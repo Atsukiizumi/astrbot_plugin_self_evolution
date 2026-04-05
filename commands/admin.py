@@ -102,10 +102,7 @@ async def handle_shut(event, plugin, minutes: str = ""):
     return f"[OK] 当前群已开启闭嘴模式，持续 {minutes_val} 分钟"
 
 
-async def handle_db(event, plugin, action: str = "", param: str = ""):
-    """数据库管理命令。"""
-    del param
-
+async def handle_db(event, plugin, action: str = ""):
     ctx = CommandContext.from_event(event, plugin)
 
     deny = ensure_admin(ctx)
@@ -165,13 +162,44 @@ async def handle_db(event, plugin, action: str = "", param: str = ""):
             msg.append(f"- {table}: {count} 条")
         return "\n".join(msg)
 
+    if action == "github_reset":
+        from astrbot.core import sp
+
+        branch = plugin.cfg.update_notify_branch
+        cache_key = f"self_evolution_github_last_sha_{branch.replace('/', '_')}"
+        await sp.put_async(scope="plugin", scope_id="global", key=cache_key, value="")
+        return "GitHub 更新缓存已重置，下次检查会立即通知"
+
     return (
         "【数据库管理】\n"
-        "/db show      # 查看数据库统计\n"
-        "/db reset     # 清空所有数据（需确认）\n"
-        "/db rebuild   # 删除数据库文件并重建（需确认）\n"
-        "/db confirm   # 确认执行 reset/rebuild"
+        "/db show        # 查看数据库统计\n"
+        "/db reset       # 清空所有数据（需确认）\n"
+        "/db rebuild     # 删除数据库文件并重建（需确认）\n"
+        "/db confirm     # 确认执行 reset/rebuild\n"
+        "/db github_reset # 重置 GitHub 更新缓存"
     )
+
+
+async def handle_kb_clear(event, plugin, scope_arg: str = ""):
+    """清空知识库命令。"""
+    ctx = CommandContext.from_event(event, plugin)
+
+    deny = ensure_admin(ctx)
+    if deny:
+        return deny
+
+    memory_store = getattr(plugin, "session_memory_store", None)
+    if not memory_store:
+        return "记忆存储模块不可用"
+
+    if scope_arg.lower() == "all":
+        return await memory_store.clear_all_kb()
+
+    target_scope = ctx.scope_id
+    if scope_arg:
+        target_scope = scope_arg
+
+    return await memory_store.clear_kb(target_scope)
 
 
 async def handle_set_san(event, plugin, value: str = ""):

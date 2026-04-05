@@ -513,3 +513,41 @@ class PluginConfig:
     @property
     def sticker_reply_min_text_length(self):
         return self._get_nested_int("sticker_reply", "min_text_length", 5)
+
+    # update_notify
+    @property
+    def update_notify_group_id(self):
+        return self._get_nested_list("update_notify", "update_notify_group_id", [])
+
+    @property
+    def update_notify_user_ids(self):
+        return self._get_nested_list("update_notify", "update_notify_user_ids", [])
+
+    @property
+    def update_notify_repo(self):
+        return self._get_nested("update_notify", "update_notify_repo", "Renyus/astrbot_plugin_self_evolution")
+
+    @property
+    def update_notify_branch(self):
+        return self._get_nested("update_notify", "update_notify_branch", "master")
+
+    @property
+    def update_check_interval(self):
+        return self._get_nested_int("update_notify", "update_check_interval", 30)
+
+    # poke
+    @property
+    def poke_reply_enabled(self):
+        return self._get_nested_bool("poke", "poke_reply_enabled", True)
+
+    @property
+    def poke_poke_back_chance(self):
+        return self._get_nested_int("poke", "poke_poke_back_chance", 50)
+
+    @property
+    def poke_complaint_texts(self):
+        return self._get_nested_list(
+            "poke",
+            "poke_complaint_texts",
+            ["干嘛呢~", "有事说事！", "别闹", "正经点"],
+        )

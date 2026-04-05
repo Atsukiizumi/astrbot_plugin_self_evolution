@@ -29,7 +29,7 @@ try:
     from astrbot.core.message.components import Video as AstrVideo
 except ImportError:
     AstrVideo = None
-from astrbot.core.star.star_handler import EventType, star_handlers_registry
+from astrbot.core.star.star_handler import EventType, StarHandlerMetadata, star_handlers_registry
 
 from . import commands
 from .cognition import SANSystem
@@ -109,11 +109,57 @@ class PromptContext:
     event: AstrMessageEvent | None = field(default=None)
 
 
+async def _poke_reply_async(plugin, target_id: str, user_id: str, group_id: str, sender_id: str):
+    """Async implementation of poke reply."""
+    complaint = random.choice(plugin.cfg.poke_complaint_texts)
+    try:
+        platform_insts = plugin.context.platform_manager.platform_insts
+        if not platform_insts:
+            return
+        bot = platform_insts[0].get_client()
+
+        if random.random() * 100 < plugin.cfg.poke_poke_back_chance:
+            if group_id:
+                await bot.call_action("group_poke", group_id=int(group_id), user_id=int(user_id))
+            else:
+                await bot.call_action("friend_poke", user_id=int(sender_id))
+        else:
+            if group_id:
+                await bot.send_msg(
+                    group_id=int(group_id),
+                    message=[{"type": "text", "data": {"text": complaint}}],
+                )
+            else:
+                await bot.send_msg(
+                    user_id=int(sender_id),
+                    message=[{"type": "text", "data": {"text": complaint}}],
+                )
+    except Exception as e:
+        logger.debug(f"[Poke] 处理失败: {e}, 改发吐槽")
+        try:
+            platform_insts = plugin.context.platform_manager.platform_insts
+            if not platform_insts:
+                return
+            bot = platform_insts[0].get_client()
+            if group_id:
+                await bot.send_msg(
+                    group_id=int(group_id),
+                    message=[{"type": "text", "data": {"text": complaint}}],
+                )
+            else:
+                await bot.send_msg(
+                    user_id=int(sender_id),
+                    message=[{"type": "text", "data": {"text": complaint}}],
+                )
+        except Exception:
+            pass
+
+
 @register(
     "astrbot_plugin_self_evolution",
     "自我进化 (Self-Evolution)",
     "CognitionCore 7.0 数字生命。",
-    "Ver 5.1.0",
+    "Ver 5.1.4",
 )
 class SelfEvolutionPlugin(Star):
     @staticmethod
@@ -218,21 +264,47 @@ class SelfEvolutionPlugin(Star):
         self._group_umo_cache = {}  # 最近见过的群会话来源 {group_id: unified_msg_origin}
         self._private_umo_cache = {}  # 最近见过的私聊会话来源 {private_user_id: unified_msg_origin}
         self._scope_registry_touch_cache = {}  # 会话范围持久化防抖 {scope_id: last_touch_timestamp}
-        self._lock = None  # 元编程文件锁，防止并发写入
+        self._last_cache_cleanup = 0.0  # 上次缓存清理时间
+
+    def _cleanup_stale_caches(self):
+        """清理过期缓存条目，防止无限膨胀。"""
+        now = time.time()
+        if now - self._last_cache_cleanup < 300:
+            return
+        self._last_cache_cleanup = now
+
+        expired_keys = [(k, v) for k, v in self._group_umo_cache.items() if now - v.get("_cached_at", 0) > 3600]
+        for k, _ in expired_keys:
+            del self._group_umo_cache[k]
+
+        expired_keys = [(k, v) for k, v in self._private_umo_cache.items() if now - v.get("_cached_at", 0) > 3600]
+        for k, _ in expired_keys:
+            del self._private_umo_cache[k]
+
+        expired_keys = [k for k, v in self._scope_registry_touch_cache.items() if now - v > 86400]
+        for k in expired_keys:
+            del self._scope_registry_touch_cache[k]
+
+        expired_keys = [k for k, v in self._pending_db_reset.items() if now > v.get("expires_at", 0)]
+        for k in expired_keys:
+            del self._pending_db_reset[k]
 
     def remember_group_umo(self, group_id, umo: str | None, user_id=None):
         """Remember the latest unified message origin for a group or private scope."""
+        self._cleanup_stale_caches()
+        now = time.time()
         if group_id and umo:
-            self._group_umo_cache[str(group_id)] = str(umo)
+            self._group_umo_cache[str(group_id)] = {"umo": str(umo), "_cached_at": now}
         elif user_id and umo:
             private_scope_id = self._resolve_profile_scope_id(None, user_id)
-            self._private_umo_cache[private_scope_id] = str(umo)
+            self._private_umo_cache[private_scope_id] = {"umo": str(umo), "_cached_at": now}
 
     def get_group_umo(self, group_id) -> str | None:
         """Return the latest cached unified message origin for a group."""
         if not group_id:
             return None
-        return self._group_umo_cache.get(str(group_id))
+        entry = self._group_umo_cache.get(str(group_id))
+        return entry.get("umo") if entry else None
 
     def get_scope_umo(self, scope_id) -> str | None:
         """Return the latest cached unified message origin for a group/private scope."""
@@ -240,8 +312,10 @@ class SelfEvolutionPlugin(Star):
             return None
         scope_id = str(scope_id)
         if scope_id.startswith(PRIVATE_SCOPE_PREFIX):
-            return self._private_umo_cache.get(scope_id)
-        return self._group_umo_cache.get(scope_id)
+            entry = self._private_umo_cache.get(scope_id)
+        else:
+            entry = self._group_umo_cache.get(scope_id)
+        return entry.get("umo") if entry else None
 
     async def touch_known_scope(self, scope_id: str | None):
         """Persist recently seen scopes for background tasks, with a small debounce to avoid hot writes."""
@@ -333,6 +407,8 @@ class SelfEvolutionPlugin(Star):
         parts.append(self._build_identity_injection(ctx))
         if self._should_inject_group_history(ctx):
             parts.append(await self._build_group_history_injection(ctx))
+        if self._should_inject_private_history(ctx):
+            parts.append(await self._build_private_history_injection(ctx))
         if self._should_inject_profile(ctx):
             parts.append(await self._build_profile_injection(ctx))
         if self._should_inject_kb_memory(ctx):
@@ -434,6 +510,9 @@ class SelfEvolutionPlugin(Star):
     def _should_inject_group_history(self, ctx: PromptContext) -> bool:
         return bool(self.cfg.inject_group_history and ctx.group_id)
 
+    def _should_inject_private_history(self, ctx: PromptContext) -> bool:
+        return bool(self.cfg.inject_group_history and not ctx.group_id and ctx.user_id)
+
     def _should_inject_profile(self, ctx: PromptContext) -> bool:
         return self.enable_profile_injection and (((ctx.has_reply or ctx.has_at) and ctx.is_group) or not ctx.is_group)
 
@@ -480,6 +559,16 @@ class SelfEvolutionPlugin(Star):
         if not hist_str:
             return ""
         return f"\n\n[最近群消息]\n{hist_str}\n"
+
+    async def _build_private_history_injection(self, ctx: PromptContext) -> str:
+        if ctx.group_id or not ctx.user_id:
+            return ""
+        from .engine.context_injection import get_private_history
+
+        hist_str = await get_private_history(self, ctx.user_id, self.cfg.group_history_count)
+        if not hist_str:
+            return ""
+        return f"\n\n[最近私聊消息]\n{hist_str}\n"
 
     async def _build_profile_injection(self, ctx: PromptContext) -> str:
         result = await self.memory_tools.query_service.query(
@@ -806,6 +895,21 @@ class SelfEvolutionPlugin(Star):
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_message_listener(self, event: AstrMessageEvent):
         """CognitionCore 7.0: 被动监听 - 滑动上下文窗口"""
+        msg_obj = getattr(event, "message_obj", None)
+        if msg_obj:
+            from astrbot.core.message.components import Poke
+
+            for comp in getattr(msg_obj, "message", []):
+                if isinstance(comp, Poke) and comp.id:
+                    target_id = str(comp.id)
+                    sender_id = str(getattr(msg_obj.sender, "user_id", ""))
+                    group_id = str(getattr(msg_obj, "group_id", "") or "")
+                    bot_id = str(getattr(msg_obj, "self_id", "") or "")
+                    if target_id == bot_id:
+                        asyncio.create_task(_poke_reply_async(self, target_id, sender_id, group_id, sender_id))
+                    event.stop_event()
+                    return
+
         group_id = event.get_group_id()
         self.remember_group_umo(group_id, getattr(event, "unified_msg_origin", None), event.get_sender_id())
         memory_scope_id = self._resolve_profile_scope_id(group_id, event.get_sender_id())
@@ -822,7 +926,7 @@ class SelfEvolutionPlugin(Star):
                     return
                 logger.debug(f"[SelfEvolution] 管理员跳过闭嘴拦截")
             else:
-                del self._shut_until_by_group[group_id]
+                self._shut_until_by_group.pop(group_id, None)
 
         logger.debug(f"[SelfEvolution] 收到消息: {event.message_str[:30] if event.message_str else '(空)'}")
 
@@ -1930,7 +2034,7 @@ class SelfEvolutionPlugin(Star):
 
         group_id = event.get_group_id()
         if not group_id:
-            yield event.plain_result("此功能仅限群聊使用")
+            logger.debug("[Sticker] send_sticker tool skipped in private chat")
             return
 
         max_retries = 3
@@ -1954,8 +2058,11 @@ class SelfEvolutionPlugin(Star):
                     skipped += 1
                     continue
 
-                with open(file_path, "rb") as f:
-                    data = f.read()
+                def _read():
+                    with open(file_path, "rb") as f:
+                        return f.read()
+
+                data = await asyncio.to_thread(_read)
                 bs64 = base64.b64encode(data).decode()
                 from astrbot.core.message.components import Image
 
@@ -2008,8 +2115,11 @@ class SelfEvolutionPlugin(Star):
                     yield event.plain_result(f"表情包文件不存在: {result['image_path']}")
                     return
 
-                with open(file_path, "rb") as f:
-                    data = f.read()
+                def _read():
+                    with open(file_path, "rb") as f:
+                        return f.read()
+
+                data = await asyncio.to_thread(_read)
                 bs64 = base64.b64encode(data).decode()
                 from astrbot.core.message.components import Image
 
@@ -2164,13 +2274,35 @@ class SelfEvolutionPlugin(Star):
             yield event.plain_result(result)
 
     @filter.command("db")
-    async def db_cmd(self, event: AstrMessageEvent, action: str = "", param: str = ""):
+    async def db_cmd(self, event: AstrMessageEvent, action: str = ""):
         """数据库管理命令"""
         if not commands.check_admin_admin(event, self):
             event.set_extra("self_evolution_command_reply", True)
             yield event.plain_result("权限拒绝：此操作仅限管理员执行。")
             return
-        result = await commands.handle_db(event, self, action, param)
+        result = await commands.handle_db(event, self, action)
+        event.set_extra("self_evolution_command_reply", True)
+        yield event.plain_result(result)
+
+    @filter.command("kb")
+    async def kb_cmd(self, event: AstrMessageEvent, action: str = "", scope: str = ""):
+        """知识库管理命令"""
+        if not commands.check_admin_admin(event, self):
+            event.set_extra("self_evolution_command_reply", True)
+            yield event.plain_result("权限拒绝：此操作仅限管理员执行。")
+            return
+        action = action.lower()
+        if action != "clear":
+            event.set_extra("self_evolution_command_reply", True)
+            yield event.plain_result(
+                "【知识库管理】\n"
+                "/kb clear [scope/all]  # 清空知识库文档\n"
+                "  不传 scope：清空当前群/私聊\n"
+                "  scope：指定 scope（如群号或 private_xxx）\n"
+                "  all：清空所有 scope（仅管理员）"
+            )
+            return
+        result = await commands.handle_kb_clear(event, self, scope)
         event.set_extra("self_evolution_command_reply", True)
         yield event.plain_result(result)
 

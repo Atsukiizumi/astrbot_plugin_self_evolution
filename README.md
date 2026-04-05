@@ -219,6 +219,48 @@ Bot 根据场景（IDLE / CASUAL / HELP / DEBATE）和沉默时长判断是否�
 | `*/{interval} * * *` | SANAnalyze | SAN 精力分析 |
 | `{profile_schedule}` | ProfileBuild | 批量构建用户画像 |
 | `{reflection_schedule}` | DailyReflection | 每日反思批处理 |
+| `{github_check_schedule}` | GitHubCheck | 检查 GitHub 仓库更新，有新 commit 时推送到指定群 |
+
+---
+
+## GitHub 更新通知
+
+插件可监控指定 GitHub 仓库指定分支，当检测到新 commit 时向目标群或用户发送通知。
+
+### 配置项
+
+- `update_notify_repo` — 仓库路径，格式 `owner/repo`（默认 `Renyus/astrbot_plugin_self_evolution`）
+- `update_notify_branch` — 分支名（默认 `master`）
+- `update_notify_group_id` — 接收通知的群 ID 列表（群聊）
+- `update_notify_user_ids` — 接收通知的用户 ID 列表（私聊）
+- `update_check_interval` — 检查间隔（分钟，默认 30）
+
+> 留空 `update_notify_group_id` 和 `update_notify_user_ids` 则不启用通知。
+
+### 首次运行保护
+
+首次检测到 commit 时不会发送通知（防止首次运行推送大量历史 commit），之后仅在新 commit 出现时通知。使用 `/db github_reset` 可重置缓存，强制重新检测。
+
+---
+
+## 戳一戳互动
+
+当收到群友或私聊用户的戳一戳（poke）时，Bot 会根据配置的概率做出反应。
+
+### 行为模式
+
+- **戳回去**：以一定概率反戳对方
+- **发送吐槽**：不戳回时随机发送一条吐槽文案
+
+### 配置项
+
+- `poke_reply_enabled` — 是否启用戳回复（默认开启）
+- `poke_poke_back_chance` — 戳回去的概率 1~100（默认 50）
+- `poke_complaint_texts` — 吐槽文案列表（默认：干嘛呢~、有事说事！、别闹、正经点）
+
+### 注意
+
+由于 NapCat 发送的 poke 事件无法区分戳/抱/亲，吐槽文案使用中性措辞，不涉及具体动作。
 
 ---
 
@@ -229,14 +271,16 @@ Bot 根据场景（IDLE / CASUAL / HELP / DEBATE）和沉默时长判断是否�
 | 命令 | 说明 |
 |------|------|
 | `/se help` | 查看指令帮助 |
+| `/se version` | 查看插件版本 |
 | `/reflect` | 触发反思 |
 | `/af show` | 查看好感度 |
 | `/san show` | 查看 SAN 状态 |
-| `/profile view [用户]` | 查看画像 |
-| `/profile create [用户]` | 创建画像 |
-| `/profile update [用户]` | 更新画像 |
+| `/profile view [用户]` | 查看画像（不传则看自己的） |
+| `/profile create [用户]` | 创建画像（仅管理员可指定他人） |
+| `/profile update [用户]` | 更新画像（仅管理员可指定他人） |
 | `/addmeal <菜名>` | 添加菜品到群菜单 |
 | `/delmeal <菜名>` | 删除菜品 |
+| `/今日老婆` | 随机抽取一名群友 |
 | `/feed` | 喂食（发送图片后使用，识图判断食物并更新饱腹感/心情） |
 | `/shut [分钟]` | 让 AI 暂时闭嘴（管理员） |
 
@@ -258,7 +302,7 @@ Bot 根据场景（IDLE / CASUAL / HELP / DEBATE）和沉默时长判断是否�
 | `/ev stats [群ID]` | 进化统计 |
 | `/ps state [群]` | 只读人格状态 |
 | `/ps status [群]` | 触发 tick 后查看人格快照 |
-| `/ps tick [群] [quality]` | 手动推进人格时间（none/negative/positive） |
+| `/ps tick [quality] [群]` | 手动推进人格时间（none/negative/positive） |
 | `/ps todo [群]` | 查看脑内待办 |
 | `/ps effects [群]` | 查看活跃效果 |
 | `/ps apply [q] [群]` | 应用互动影响（q: bad/awkward/normal/good/relief/brief） |
@@ -279,6 +323,8 @@ Bot 根据场景（IDLE / CASUAL / HELP / DEBATE）和沉默时长判断是否�
 | `/db reset` | 重置数据库 |
 | `/db rebuild` | 重建数据库 |
 | `/db confirm` | 确认操作 |
+| `/db github_reset` | 重置 GitHub 更新缓存（强制重新检测） |
+| `/kb clear [scope/all]` | 清空知识库文档（仅管理员） |
 
 ---
 
@@ -290,7 +336,6 @@ Bot 根据场景（IDLE / CASUAL / HELP / DEBATE）和沉默时长判断是否�
 - `persona_name` — 人格名称
 - `admin_users` — 管理员白名单
 - `target_scopes` — 目标群/私聊白名单
-- `debug_log_enabled` — 调试日志
 
 ### 核心模块开关
 
@@ -307,44 +352,81 @@ Bot 根据场景（IDLE / CASUAL / HELP / DEBATE）和沉默时长判断是否�
 - `memory_summary_chunk_size` — 总结 chunk 大小
 - `memory_summary_schedule` — 总结计划（默认 06:00）
 - `enable_kb_memory_recall` — 召回记忆
+- `memory_query_fallback_enabled` — KB 检索兜底
 - `profile_msg_count` — 画像消息阈值
 - `profile_cooldown_minutes` — 画像冷却（分钟）
+- `enable_profile_injection` — 注入画像摘要
+- `enable_profile_fact_writeback` — 写回新事实
 - `auto_profile_enabled` — 自动构建画像
 - `auto_profile_schedule` — 画像构建计划
 - `auto_profile_batch_size` — 每批处理群数
 - `auto_profile_batch_interval` — 批次间隔（分钟）
 
+### Prompt 注入
+
+- `disable_framework_contexts` — 禁用框架上下文
+- `inject_group_history` — 注入群聊历史
+- `group_history_count` — 历史注入条数
+- `max_prompt_injection_length` — 注入最大长度
+- `surprise_enabled` — 启用惊奇检测
+- `surprise_boost_keywords` — 惊奇关键词表
+- `dropout_enabled` — 启用随机留白
+- `dropout_edge_rate` — 随机留白概率
+
 ### 行为与互动
 
 - `affinity_auto_enabled` — 自动好感度更新
 - `affinity_recovery_enabled` — 好感度每日恢复
-- `interject_interval` — 插话检查间隔（分钟）
-- `interject_cooldown` — 插话冷却（秒）
-- `interject_trigger_probability` — 触发概率
+- `affinity_direct_engagement_delta` — 主动互动加分值
+- `affinity_friendly_language_delta` — 礼貌语言加分值
+- `affinity_hostile_language_delta` — 攻击语言扣分值
+- `affinity_returning_user_delta` — 回访用户加分值
+- `affinity_direct_engagement_cooldown_minutes` — 互动冷却（分钟）
+- `affinity_friendly_daily_limit` — 礼貌词每日上限
+- `affinity_hostile_cooldown_minutes` — 攻击冷却（分钟）
+- `affinity_returning_user_daily_limit` — 回访每日上限
+- `interject_enabled` — 启用主动插嘴
+- `interject_interval` — 插嘴检查间隔（分钟）
+- `interject_cooldown` — 插嘴冷却（秒）
+- `interject_trigger_probability` — 插嘴触发概率
 - `engagement_react_probability` — emoji reaction 概率
-- `san_auto_analyze_enabled` — 自动 SAN 分析
+
+### SAN 精力系统
+
+- `san_enabled` — 启用 SAN 系统
+- `san_max` — SAN 最大值
+- `san_cost_per_message` — 每条消息耗 SAN
+- `san_recovery_per_hour` — 每小时恢复 SAN
+- `san_low_threshold` — 低 SAN 阈值
+- `san_auto_analyze_enabled` — 启用 SAN 分析
+- `san_analyze_interval` — SAN 分析间隔（秒）
+- `san_msg_count_per_group` — 每群分析条数
 
 ### 审核（moderation）
 
-- `moderation.moderation_enabled` — 启用审核
-- `moderation.moderation_enforcement_enabled` — 执行处罚
-- `moderation.moderation_nsfw_keywords` — NSFW 关键词
-- `moderation.moderation_promo_keywords` — 引流推广关键词
-- `moderation.moderation_refusal_keywords` — 模型拒绝描述关键词
-- `moderation.moderation_nsfw_refusal_confidence` — NSFW 置信度
-- `moderation.moderation_promo_refusal_confidence` — 引流置信度
-- `moderation.moderation_weak_keyword_confidence` — 关键词置信度
-- `moderation.moderation_confidence_threshold` — 置信度门槛
-- `moderation.moderation_escalation_threshold` — 踢人阈值
-- `moderation.moderation_ban_duration_minutes` — 禁言时长
-- `moderation.moderation_nsfw_warning_message` — NSFW 警告消息
-- `moderation.moderation_promo_warning_message` — 引流警告消息
+- `moderation.enabled` — 启用审核
+- `moderation.enforcement_enabled` — 执行处罚
+- `moderation.nsfw_keywords` — NSFW 关键词
+- `moderation.promo_keywords` — 引流推广关键词
+- `moderation.refusal_keywords` — 模型拒绝描述关键词
+- `moderation.nsfw_refusal_confidence` — NSFW 拒绝描述置信度
+- `moderation.promo_refusal_confidence` — 引流拒绝描述置信度
+- `moderation.weak_keyword_confidence` — 关键词匹配置信度
+- `moderation.confidence_threshold` — 置信度门槛
+- `moderation.escalation_threshold` — 踢人阈值
+- `moderation.ban_duration_minutes` — 禁言时长（分钟）
+- `moderation.nsfw_warning_message` — NSFW 警告消息
+- `moderation.nsfw_ban_reason_message` — NSFW 处罚理由消息
+- `moderation.promo_warning_message` — 引流警告消息
+- `moderation.promo_ban_reason_message` — 引流处罚理由消息
 
 ### 表情包与娱乐
 
 - `sticker_learning_enabled` — 学习表情包
-- `sticker_freq_threshold` — 表情包频率阈值
+- `sticker_target_qq` — 学习目标 QQ 列表
 - `sticker_total_limit` — 表情包总数上限
+- `sticker_send_cooldown` — 发送冷却（分钟）
+- `sticker_freq_threshold` — 学习频次阈值
 - `sticker_reply_enabled` — 回复附加表情包
 - `sticker_reply_chance` — 触发概率（1~100）
 - `sticker_reply_max_per_hour` — 每小时上限
@@ -352,8 +434,21 @@ Bot 根据场景（IDLE / CASUAL / HELP / DEBATE）和沉默时长判断是否�
 - `meal_max_items` — 菜单最大条目
 - `meal_eat_keywords` — 吃饭关键词
 - `meal_banquet_keywords` — 设宴关键词
-- `meal_banquet_count` — 设宴数量
-- `meal_banquet_cooldown_minutes` — 设宴冷却
+- `meal_banquet_count` — 设宴触发次数上限
+- `meal_banquet_cooldown_minutes` — 设宴冷却（分钟）
+
+### 戳一戳互动
+
+- `poke_reply_enabled` — 启用戳回复
+- `poke_poke_back_chance` — 戳回概率 1~100
+- `poke_complaint_texts` — 吐槽文案列表
+
+### Debug 调试
+
+- `debug_log_enabled` — 输出调试日志
+- `memory_debug_enabled` — 记忆模块调试日志
+- `engagement_debug_enabled` — 社交互动调试日志
+- `affinity_debug_enabled` — 情感积分调试日志
 
 ---
 
@@ -379,7 +474,7 @@ Bot 根据场景（IDLE / CASUAL / HELP / DEBATE）和沉默时长判断是否�
 - `[Engagement]` / `[ReplyIntent]` / `[ReplyExecutor]`
 - `[Affinity]` / `[SAN]`
 - `[Moderation]` / `[ModerationEnforcer]`
-- `[FeedHandler]` / `[CaptionService]`
+- `[FeedHandler]` / `[CaptionService]` / `[Poke]`
 
 正常跳过通常只打 `debug`，不打 `warning`。
 

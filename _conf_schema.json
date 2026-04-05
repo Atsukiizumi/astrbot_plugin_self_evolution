@@ -613,5 +613,67 @@
                 "hint": "回复文字长度 ≥ 此值时才触发表情包，短回复不触发。"
             }
         }
+    },
+    "update_notify": {
+        "type": "object",
+        "description": "GitHub 更新通知",
+        "hint": "插件仓库更新时自动通知指定群聊。",
+        "items": {
+            "update_notify_group_id": {
+                "description": "通知群号列表",
+                "type": "list",
+                "default": [],
+                "hint": "留空则不启用通知。填入群号后，检测到新 commit 会自动发送通知。"
+            },
+            "update_notify_user_ids": {
+                "description": "通知用户 ID 列表（私聊）",
+                "type": "list",
+                "default": [],
+                "hint": "填入用户 QQ 号，检测到新 commit 会发送私聊通知。"
+            },
+            "update_notify_repo": {
+                "description": "仓库路径",
+                "type": "string",
+                "default": "Renyus/astrbot_plugin_self_evolution",
+                "hint": "格式：owner/repo"
+            },
+            "update_notify_branch": {
+                "description": "分支名",
+                "type": "string",
+                "default": "master",
+                "hint": "要检查的分支名，如 master、refactor/napcat-integration"
+            },
+            "update_check_interval": {
+                "description": "检查间隔（分钟）",
+                "type": "int",
+                "default": 30,
+                "hint": "每多少分钟检查一次 GitHub 新提交。"
+            }
+        }
+    },
+    "poke": {
+        "type": "object",
+        "description": "戳一戳互动",
+        "hint": "戳我时的互动反应。",
+        "items": {
+            "poke_reply_enabled": {
+                "description": "启用戳回复",
+                "type": "bool",
+                "default": true,
+                "hint": "开启后收到戳一戳会有反应。"
+            },
+            "poke_poke_back_chance": {
+                "description": "戳回概率",
+                "type": "int",
+                "default": 50,
+                "hint": "1~100，戳回的概率；否则发送吐槽文字。"
+            },
+            "poke_complaint_texts": {
+                "description": "吐槽文本列表",
+                "type": "list",
+                "default": ["干嘛呢~", "有事说事！", "别闹", "正经点"],
+                "hint": "不戳回时随机选一条发送。"
+            }
+        }
     }
 }

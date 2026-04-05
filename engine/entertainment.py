@@ -399,6 +399,9 @@ class EntertainmentEngine:
 
     async def send_sticker_for_engagement(self, group_id: str) -> str | None:
         """engagement REACT 专用表情包发送。全局锁防止并发穿透冷却。"""
+        if not group_id or not group_id.isdigit():
+            return None
+
         async with self._sticker_send_lock:
             if not await self.should_send_sticker():
                 logger.debug("[Sticker] engagement react skipped by sticker cooldown")
@@ -410,12 +413,15 @@ class EntertainmentEngine:
 
             try:
                 file_path = self.sticker_store.get_sticker_path(sticker)
-                if not file_path or not Path(file_path).exists():
+                if not file_path or not file_path.exists():
                     logger.warning(f"[Sticker] 表情包文件不存在: {sticker['filename']}")
                     return None
 
-                with open(file_path, "rb") as f:
-                    data = f.read()
+                def _read():
+                    with open(file_path, "rb") as f:
+                        return f.read()
+
+                data = await asyncio.to_thread(_read)
                 bs64 = __import__("base64").b64encode(data).decode()
 
                 from astrbot.core.message.components import Image
@@ -437,5 +443,5 @@ class EntertainmentEngine:
             platform = self.plugin.context.platform_manager.platform_insts[0]
             bot = platform.bot
             await bot.send_group_msg(group_id=int(group_id), message=[{"type": "text", "data": {"text": text}}])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Entertainment] _send_to_group 失败 group={group_id}: {e}")

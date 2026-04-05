@@ -13,11 +13,19 @@ from astrbot.api import logger
 _msg_cache: dict[str, tuple[float, dict]] = {}
 _MSG_CACHE_TTL = 300
 _MSG_CACHE_MAX = 500
+_msg_cache_lock = asyncio.Lock()
 
 # get_group_history 缓存: (group_id, count) -> (timestamp, messages_list)
 _group_history_cache: dict[tuple[str, int], tuple[float, list[dict]]] = {}
 _GROUP_HISTORY_CACHE_TTL = 30
 _GROUP_HISTORY_CACHE_MAX = 20
+_group_history_cache_lock = asyncio.Lock()
+
+# get_private_history 缓存: (user_id, count) -> (timestamp, messages_list)
+_private_history_cache: dict[tuple[str, int], tuple[float, list[dict]]] = {}
+_PRIVATE_HISTORY_CACHE_TTL = 30
+_PRIVATE_HISTORY_CACHE_MAX = 20
+_private_history_cache_lock = asyncio.Lock()
 
 
 async def parse_message_chain(msg: dict, plugin=None) -> str:
@@ -61,13 +69,15 @@ async def parse_message_chain(msg: dict, plugin=None) -> str:
             if msg_id and plugin:
                 cached = None
                 now = time.time()
-                if msg_id in _msg_cache:
-                    ts, cached = _msg_cache[msg_id]
-                    if now - ts < _MSG_CACHE_TTL:
-                        pass  # use cached
-                    else:
-                        cached = None
-                        del _msg_cache[msg_id]
+
+                async with _msg_cache_lock:
+                    if msg_id in _msg_cache:
+                        ts, cached = _msg_cache[msg_id]
+                        if now - ts < _MSG_CACHE_TTL:
+                            pass  # use cached
+                        else:
+                            cached = None
+                            del _msg_cache[msg_id]
 
                 if cached is None:
                     try:
@@ -77,12 +87,11 @@ async def parse_message_chain(msg: dict, plugin=None) -> str:
                             if hasattr(platform, "get_client"):
                                 bot = platform.get_client()
                                 if bot:
-                                    if len(_msg_cache) < _MSG_CACHE_MAX:
-                                        result = await bot.call_action("get_msg", message_id=int(msg_id))
-                                        _msg_cache[msg_id] = (now, result)
-                                        cached = result
-                                    else:
-                                        cached = await bot.call_action("get_msg", message_id=int(msg_id))
+                                    result = await bot.call_action("get_msg", message_id=int(msg_id))
+                                    async with _msg_cache_lock:
+                                        if len(_msg_cache) < _MSG_CACHE_MAX:
+                                            _msg_cache[msg_id] = (now, result)
+                                    cached = result
                     except Exception:
                         cached = None
 
@@ -139,12 +148,13 @@ async def _fetch_cached_messages(plugin, group_id: str, count: int = 10) -> list
         now = time.time()
         messages = None
 
-        if cache_key in _group_history_cache:
-            ts, cached = _group_history_cache[cache_key]
-            if now - ts < _GROUP_HISTORY_CACHE_TTL:
-                messages = cached
-            else:
-                del _group_history_cache[cache_key]
+        async with _group_history_cache_lock:
+            if cache_key in _group_history_cache:
+                ts, cached = _group_history_cache[cache_key]
+                if now - ts < _GROUP_HISTORY_CACHE_TTL:
+                    messages = cached
+                else:
+                    del _group_history_cache[cache_key]
 
         if messages is None:
             result = await bot.call_action(
@@ -155,10 +165,11 @@ async def _fetch_cached_messages(plugin, group_id: str, count: int = 10) -> list
             )
             messages = result.get("messages", [])
 
-            if len(_group_history_cache) >= _GROUP_HISTORY_CACHE_MAX:
-                oldest_key = min(_group_history_cache, key=lambda k: _group_history_cache[k][0])
-                del _group_history_cache[oldest_key]
-            _group_history_cache[cache_key] = (now, messages)
+            async with _group_history_cache_lock:
+                if len(_group_history_cache) >= _GROUP_HISTORY_CACHE_MAX:
+                    oldest_key = min(_group_history_cache, key=lambda k: _group_history_cache[k][0])
+                    del _group_history_cache[oldest_key]
+                _group_history_cache[cache_key] = (now, messages)
 
         return messages
     except Exception as e:
@@ -197,6 +208,70 @@ async def get_group_history_raw(plugin, group_id: str, count: int = 10) -> list:
     与 get_group_history 共享缓存，不会额外调 API。
     """
     return await _fetch_cached_messages(plugin, group_id, count)
+
+
+async def get_private_history(plugin, user_id: str, count: int = 10) -> str:
+    """
+    获取私聊消息历史（格式化文本）
+
+    Args:
+        plugin: 插件实例
+        user_id: 用户ID
+        count: 获取消息数量
+
+    Returns:
+        格式化的私聊消息历史字符串
+    """
+    messages = await _fetch_cached_private_messages(plugin, user_id, count)
+    if not messages:
+        return ""
+    try:
+        results = await asyncio.gather(*[parse_message_chain(msg, plugin) for msg in messages])
+        return "\n".join(results)
+    except Exception as e:
+        logger.debug(f"[ContextInjection] 格式化私聊消息历史失败: {e}")
+        return ""
+
+
+async def _fetch_cached_private_messages(plugin, user_id: str, count: int = 10) -> list:
+    """获取私聊消息历史原始数据（带缓存）。"""
+    try:
+        platform_insts = plugin.context.platform_manager.platform_insts
+        if not platform_insts:
+            return []
+
+        platform = platform_insts[0]
+        if not hasattr(platform, "get_client"):
+            return []
+
+        bot = platform.get_client()
+        if not bot:
+            return []
+
+        cache_key = (user_id, count)
+        now = time.time()
+
+        async with _private_history_cache_lock:
+            if cache_key in _private_history_cache:
+                ts, cached = _private_history_cache[cache_key]
+                if now - ts < _PRIVATE_HISTORY_CACHE_TTL:
+                    return cached
+                else:
+                    del _private_history_cache[cache_key]
+
+        result = await bot.call_action("get_friend_msg_history", user_id=int(user_id), count=count)
+        messages = result.get("messages", [])
+
+        async with _private_history_cache_lock:
+            if len(_private_history_cache) >= _PRIVATE_HISTORY_CACHE_MAX:
+                oldest_key = min(_private_history_cache.keys(), key=lambda k: _private_history_cache[k][0])
+                del _private_history_cache[oldest_key]
+            _private_history_cache[cache_key] = (now, messages)
+        return messages
+
+    except Exception as e:
+        logger.debug(f"[ContextInjection] 获取私聊历史失败: {e}")
+        return []
 
 
 def build_identity_context(

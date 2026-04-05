@@ -4,6 +4,7 @@ import logging
 
 from .tasks import (
     scheduled_affinity_recovery,
+    scheduled_github_check,
     scheduled_interject,
     scheduled_memory_summary,
     scheduled_persona_consolidation,
@@ -123,6 +124,17 @@ async def register_tasks(plugin):
                 persistent=True,
             )
             logger.info(f"[SelfEvolution] 已注册 Interject: {interject_cron}")
+
+        check_interval = plugin.cfg.update_check_interval
+        check_cron = f"*/{check_interval} * * * *"
+        await cron_mgr.add_basic_job(
+            name="SelfEvolution_GitHubCheck",
+            cron_expression=check_cron,
+            handler=lambda: scheduled_github_check(plugin),
+            description="SelfEvolution: GitHub 仓库更新检查",
+            persistent=True,
+        )
+        logger.info(f"[SelfEvolution] 已注册 GitHubCheck: {check_cron}")
 
         await cron_mgr.add_basic_job(
             name="SelfEvolution_PersonaConsolidation",

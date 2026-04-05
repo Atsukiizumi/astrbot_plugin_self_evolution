@@ -39,6 +39,24 @@ from .persona_sim_types import (
 logger = logging.getLogger("astrbot")
 
 
+def _row_to_persona_effect(row: dict) -> PersonaEffect:
+    """将 DB row 转换为 PersonaEffect 对象。"""
+    return PersonaEffect(
+        effect_id=row["effect_id"],
+        effect_type=EffectType(row["effect_type"]),
+        name=row["name"],
+        source=row["source"],
+        intensity=int(row["intensity"]),
+        started_at=float(row["started_at"]),
+        expires_at=float(row["expires_at"]),
+        prompt_hint=row.get("prompt_hint", ""),
+        tags=row.get("tags", "").split(",") if row.get("tags") else [],
+        source_detail=row.get("source_detail", ""),
+        decay_style=row.get("decay_style", "gradual"),
+        recovery_style=row.get("recovery_style", "passive"),
+    )
+
+
 class PersonaSimEngine:
     def __init__(self, plugin):
         self.plugin = plugin
@@ -46,8 +64,8 @@ class PersonaSimEngine:
         self._thought_cache: dict[str, str] = {}
 
     async def tick_time_only(self, scope_id: str, now: float | None = None) -> PersonaSnapshot:
-        """只推进时间，不应用真实互动。用于被动观察消息时的自动 tick。"""
-        return await self.tick(scope_id, now=now, interaction_quality="none")
+        """只推进时间，不应用真实互动，不触发新效果。用于被动观察消息时的自动 tick。"""
+        return await self.tick(scope_id, now=now, interaction_quality="none", skip_effect_triggers=True)
 
     async def apply_interaction(
         self,
@@ -94,26 +112,8 @@ class PersonaSimEngine:
             await self._dao.upsert_persona_state(scope_id, state)
 
         active_rows = await self._dao.get_active_persona_effects(scope_id) if self._dao else []
-        active_effects: list[PersonaEffect] = []
-        active_ids: set[str] = set()
-        for row in active_rows:
-            e = PersonaEffect(
-                effect_id=row["effect_id"],
-                effect_type=EffectType(row["effect_type"]),
-                name=row["name"],
-                source=row["source"],
-                intensity=int(row["intensity"]),
-                started_at=float(row["started_at"]),
-                expires_at=float(row["expires_at"]),
-                prompt_hint=row.get("prompt_hint", ""),
-                tags=row.get("tags", "").split(",") if row.get("tags") else [],
-                source_detail=row.get("source_detail", ""),
-                decay_style=row.get("decay_style", "gradual"),
-                recovery_style=row.get("recovery_style", "passive"),
-            )
-            if e.is_active(now):
-                active_effects.append(e)
-                active_ids.add(e.effect_id)
+        active_effects = [e for e in (_row_to_persona_effect(r) for r in active_rows) if e.is_active(now)]
+        active_ids = {e.effect_id for e in active_effects}
 
         logger.debug(f"[PersonaSim] apply_interaction 从DB恢复 active_effects={list(active_ids)} scope={scope_id}")
         event_rows = await self._dao.get_recent_persona_events(scope_id, limit=5) if self._dao else []
@@ -182,6 +182,7 @@ class PersonaSimEngine:
         interaction_quality: str = "none",
         interaction_mode: str = "passive",
         interaction_outcome: str = "connected",
+        skip_effect_triggers: bool = False,
     ) -> PersonaSnapshot:
         """执行一次 tick 推演，返回当前 snapshot。"""
         now = now or time.time()
@@ -220,33 +221,17 @@ class PersonaSimEngine:
         ]
 
         active_rows = await self._dao.get_active_persona_effects(scope_id) if self._dao else []
-        active_effects: list[PersonaEffect] = []
-        active_ids: set[str] = set()
-        for row in active_rows:
-            e = PersonaEffect(
-                effect_id=row["effect_id"],
-                effect_type=EffectType(row["effect_type"]),
-                name=row["name"],
-                source=row["source"],
-                intensity=int(row["intensity"]),
-                started_at=float(row["started_at"]),
-                expires_at=float(row["expires_at"]),
-                prompt_hint=row.get("prompt_hint", ""),
-                tags=row.get("tags", "").split(",") if row.get("tags") else [],
-                source_detail=row.get("source_detail", ""),
-                decay_style=row.get("decay_style", "gradual"),
-                recovery_style=row.get("recovery_style", "passive"),
-            )
-            if e.is_active(now):
-                active_effects.append(e)
-                active_ids.add(e.effect_id)
+        active_effects = [e for e in (_row_to_persona_effect(r) for r in active_rows) if e.is_active(now)]
+        active_ids = {e.effect_id for e in active_effects}
 
         logger.debug(f"[PersonaSim] tick 从DB恢复 active_effects={list(active_ids)} scope={scope_id}")
         expired_ids = {row["effect_id"] for row in active_rows if now >= float(row["expires_at"]) > 0}
         if expired_ids and self._dao:
             await self._dao.deactivate_persona_effects(scope_id, list(expired_ids))
 
-        triggered = eval_effect_triggers(state, active_ids, recent_events, now)
+        triggered = []
+        if not skip_effect_triggers:
+            triggered = eval_effect_triggers(state, active_ids, recent_events, now)
         effect_events: list[PersonaEvent] = []
         for e in triggered:
             active_effects.append(e)
@@ -453,24 +438,7 @@ class PersonaSimEngine:
             thought_process=self._thought_cache.get(scope_id, "") or state_row.get("thought_process", ""),
         )
         active_rows = await self._dao.get_active_persona_effects(scope_id)
-
-        def _row_to_effect(row: dict) -> PersonaEffect:
-            return PersonaEffect(
-                effect_id=row["effect_id"],
-                effect_type=EffectType(row["effect_type"]),
-                name=row["name"],
-                source=row["source"],
-                intensity=int(row["intensity"]),
-                started_at=float(row["started_at"]),
-                expires_at=float(row["expires_at"]),
-                prompt_hint=row.get("prompt_hint", ""),
-                tags=row.get("tags", "").split(",") if row.get("tags") else [],
-                source_detail=row.get("source_detail", ""),
-                decay_style=row.get("decay_style", "gradual"),
-                recovery_style=row.get("recovery_style", "passive"),
-            )
-
-        active_effects = [e for e in (_row_to_effect(r) for r in active_rows) if e.is_active(now)]
+        active_effects = [e for e in (_row_to_persona_effect(r) for r in active_rows) if e.is_active(now)]
         logger.debug(
             f"[PersonaSim] get_snapshot 从DB恢复 active_effects={[e.effect_id for e in active_effects]} scope={scope_id}"
         )
@@ -686,26 +654,8 @@ class PersonaSimEngine:
         )
 
         active_rows = await self._dao.get_active_persona_effects(scope_id) if self._dao else []
-        active_effects: list[PersonaEffect] = []
-        active_ids: set[str] = set()
-        for row in active_rows:
-            e = PersonaEffect(
-                effect_id=row["effect_id"],
-                effect_type=EffectType(row["effect_type"]),
-                name=row["name"],
-                source=row["source"],
-                intensity=int(row["intensity"]),
-                started_at=float(row["started_at"]),
-                expires_at=float(row["expires_at"]),
-                prompt_hint=row.get("prompt_hint", ""),
-                tags=row.get("tags", "").split(",") if row.get("tags") else [],
-                source_detail=row.get("source_detail", ""),
-                decay_style=row.get("decay_style", "gradual"),
-                recovery_style=row.get("recovery_style", "passive"),
-            )
-            if e.is_active(now):
-                active_effects.append(e)
-                active_ids.add(e.effect_id)
+        active_effects = [e for e in (_row_to_persona_effect(r) for r in active_rows) if e.is_active(now)]
+        active_ids = {e.effect_id for e in active_effects}
 
         for e in new_effects:
             active_effects.append(e)
