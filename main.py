@@ -1222,11 +1222,23 @@ class SelfEvolutionPlugin(Star):
         """系统命令"""
 
     @se_group.command("help")
-    async def show_help(self, event: AstrMessageEvent):
-        """查看插件帮助"""
-        result = await commands.handle_help_text(event, self)
+    async def show_help(self, event: AstrMessageEvent, param: str = ""):
+        """查看插件帮助，支持 /se help <指令> 查看详细帮助"""
         event.set_extra("self_evolution_command_reply", True)
-        yield event.plain_result(result)
+
+        if param.strip():
+            # 查看指定指令组的详细子命令
+            result = await commands.handle_group_help(event, self, param.strip())
+            yield event.plain_result(result)
+        else:
+            # 显示一级指令列表
+            result = await commands.handle_main_help(event, self)
+            yield event.plain_result(result)
+
+    # ========== 为每个命令组添加 help 子命令 ==========
+
+    # 注意：这些 help 命令放在 se_group 之后是因为 Python 的执行顺序
+    # 实际使用时这些命令会在各自 group 定义处响应
 
     @se_group.command("version")
     async def show_version(self, event: AstrMessageEvent):
@@ -1253,7 +1265,13 @@ class SelfEvolutionPlugin(Star):
     @filter.command_group("meal")
     def meal_group(self):
         """群菜单管理"""
-        pass
+
+    @meal_group.command("help")
+    async def meal_help(self, event: AstrMessageEvent):
+        """查看群菜单指令帮助"""
+        result = await commands.handle_group_help(event, self, "meal")
+        event.set_extra("self_evolution_command_reply", True)
+        yield event.plain_result(result)
 
     @meal_group.command("ban")
     async def meal_ban(self, event: AstrMessageEvent, target_user_id: str = ""):
@@ -1442,6 +1460,13 @@ class SelfEvolutionPlugin(Star):
     def af_group(self):
         """好感度管理"""
 
+    @af_group.command("help")
+    async def af_help(self, event: AstrMessageEvent):
+        """查看好感度指令帮助"""
+        result = await commands.handle_group_help(event, self, "af")
+        event.set_extra("self_evolution_command_reply", True)
+        yield event.plain_result(result)
+
     @af_group.command("show")
     async def check_affinity(self, event: AstrMessageEvent):
         """查询机器人对你的当前好感度。"""
@@ -1501,6 +1526,13 @@ class SelfEvolutionPlugin(Star):
     def san_group(self):
         """SAN 状态管理"""
 
+    @san_group.command("help")
+    async def san_help(self, event: AstrMessageEvent):
+        """查看 SAN 指令帮助"""
+        result = await commands.handle_group_help(event, self, "san")
+        event.set_extra("self_evolution_command_reply", True)
+        yield event.plain_result(result)
+
     @san_group.command("show")
     async def show_san(self, event: AstrMessageEvent):
         """查看当前 SAN 状态"""
@@ -1534,6 +1566,13 @@ class SelfEvolutionPlugin(Star):
     @filter.command_group("ev")
     def ev_group(self):
         """人格进化管理"""
+
+    @ev_group.command("help")
+    async def ev_help(self, event: AstrMessageEvent):
+        """查看进化指令帮助"""
+        result = await commands.handle_group_help(event, self, "ev")
+        event.set_extra("self_evolution_command_reply", True)
+        yield event.plain_result(result)
 
     @ev_group.command("review")
     async def review_evolutions(self, event: AstrMessageEvent, page: int = 1):
@@ -1933,6 +1972,13 @@ class SelfEvolutionPlugin(Star):
     def profile_group(self):
         """用户画像命令"""
 
+    @profile_group.command("help")
+    async def profile_help(self, event: AstrMessageEvent):
+        """查看画像指令帮助"""
+        result = await commands.handle_group_help(event, self, "profile")
+        event.set_extra("self_evolution_command_reply", True)
+        yield event.plain_result(result)
+
     @profile_group.command("view")
     async def view_profile_cmd(self, event: AstrMessageEvent, user_id: str = ""):
         """查看用户画像"""
@@ -2080,6 +2126,13 @@ class SelfEvolutionPlugin(Star):
     @filter.command_group("sticker")
     def sticker_group(self):
         """表情包管理"""
+
+    @sticker_group.command("help")
+    async def sticker_help(self, event: AstrMessageEvent):
+        """查看表情包指令帮助"""
+        result = await commands.handle_group_help(event, self, "sticker")
+        event.set_extra("self_evolution_command_reply", True)
+        yield event.plain_result(result)
 
     @sticker_group.command("list")
     async def sticker_list_cmd(self, event: AstrMessageEvent, page: str = ""):
@@ -2309,7 +2362,13 @@ class SelfEvolutionPlugin(Star):
     @filter.command_group("ps")
     def ps_group(self):
         """人格生活模拟"""
-        pass
+
+    @ps_group.command("help")
+    async def ps_help(self, event: AstrMessageEvent):
+        """查看 Persona 指令帮助"""
+        result = await commands.handle_group_help(event, self, "ps")
+        event.set_extra("self_evolution_command_reply", True)
+        yield event.plain_result(result)
 
     @ps_group.command("status")
     async def persona_status_cmd(self, event: AstrMessageEvent, scope: str = ""):

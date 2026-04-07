@@ -5,12 +5,12 @@ import sys
 from pathlib import Path
 
 try:
-    from ..engine.help_catalog import format_text_help
+    from ..engine.help_catalog import format_text_help, format_main_help, format_group_help
 except ImportError:
     _ROOT = Path(__file__).resolve().parents[2]
     if str(_ROOT) not in sys.path:
         sys.path.insert(0, str(_ROOT))
-    from engine.help_catalog import format_text_help
+    from engine.help_catalog import format_text_help, format_main_help, format_group_help
 
 
 async def _read_metadata_version() -> str:
@@ -53,3 +53,17 @@ async def handle_help_text(event, plugin) -> str:
     user_id = event.get_sender_id()
     is_admin = event.is_admin() or (plugin.admin_users and str(user_id) in plugin.admin_users)
     return format_text_help(is_admin=is_admin)
+
+
+async def handle_main_help(event, plugin) -> str:
+    """显示一级指令列表"""
+    user_id = event.get_sender_id()
+    is_admin = event.is_admin() or (plugin.admin_users and str(user_id) in plugin.admin_users)
+    return format_main_help(is_admin=is_admin)
+
+
+async def handle_group_help(event, plugin, group_name: str) -> str:
+    """显示指定指令组的子命令列表"""
+    user_id = event.get_sender_id()
+    is_admin = event.is_admin() or (plugin.admin_users and str(user_id) in plugin.admin_users)
+    return format_group_help(group_name, is_admin=is_admin)

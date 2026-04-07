@@ -62,6 +62,152 @@ GROUP_NAMES: dict[CommandGroup, str] = {
 }
 
 
+# ========== 分级帮助系统 ==========
+
+# 一级指令（命令组）定义
+TOP_LEVEL_COMMANDS: dict[str, dict] = {
+    "af": {"name": "好感度", "desc": "关系温度管理"},
+    "san": {"name": "SAN", "desc": "精力值系统"},
+    "ps": {"name": "Persona", "desc": "人格生活模拟"},
+    "profile": {"name": "画像", "desc": "用户画像管理"},
+    "sticker": {"name": "表情包", "desc": "表情包管理"},
+    "ev": {"name": "进化", "desc": "人格进化审核"},
+    "db": {"name": "数据库", "desc": "数据库统计与管理"},
+    "meal": {"name": "菜单", "desc": "群菜单管理"},
+    "reflect": {"name": "反思", "desc": "手动触发自我反思"},
+    "shut": {"name": "闭嘴", "desc": "让 AI 暂时闭嘴"},
+    "今日老婆": {"name": "今日", "desc": "今日老婆功能"},
+    "addmeal": {"name": "加菜", "desc": "添加菜品到菜单"},
+    "delmeal": {"name": "删菜", "desc": "从菜单删除菜品"},
+    "feed": {"name": "喂食", "desc": "喂食角色功能"},
+    "kb": {"name": "知识库", "desc": "知识库管理"},
+}
+
+# 子命令按指令组分类
+SUB_COMMANDS: dict[str, list[tuple]] = {
+    "af": [
+        ("show", "查看当前好感度", False),
+        ("debug", "查看详细好感度", True),
+        ("set", "强制设置好感度", True),
+    ],
+    "san": [
+        ("show", "查看当前 SAN 状态", False),
+        ("set", "查看或设置 SAN", True),
+    ],
+    "ps": [
+        ("state", "只读当前人格状态", True),
+        ("status", "推进后查看人格快照", True),
+        ("todo", "查看当前脑内待办", True),
+        ("effects", "查看当前状态效果", True),
+        ("apply", "应用一次互动影响", True),
+        ("tick", "手动推进人格时间", True),
+        ("today", "查看今日人格摘要", True),
+        ("consolidate", "执行人格日结", True),
+        ("think", "手动触发内心独白", True),
+    ],
+    "profile": [
+        ("view", "查看用户画像", False),
+        ("create", "创建画像", False),
+        ("update", "更新画像", False),
+        ("delete", "删除画像", True),
+        ("stats", "查看画像统计", True),
+    ],
+    "sticker": [
+        ("list", "查看表情包列表", True),
+        ("preview", "预览指定表情包", True),
+        ("delete", "删除指定表情包", True),
+        ("disable", "禁用指定表情包", True),
+        ("enable", "启用指定表情包", True),
+        ("clear", "清空全部表情包", True),
+        ("stats", "查看表情包统计", True),
+        ("sync", "同步本地表情包文件", True),
+        ("add", "添加表情包", True),
+        ("migrate", "迁移表情包数据", True),
+    ],
+    "ev": [
+        ("review", "查看待审核进化", True),
+        ("approve", "批准指定进化", True),
+        ("reject", "拒绝指定进化", True),
+        ("clear", "清空待审核队列", True),
+        ("stats", "查看进化统计", True),
+    ],
+    "db": [
+        ("show", "查看数据库统计", True),
+        ("reset", "清空插件数据", True),
+        ("rebuild", "删除并重建数据库", True),
+        ("confirm", "确认执行危险操作", True),
+    ],
+    "meal": [
+        ("ban", "禁止用户加菜", True),
+        ("unban", "解除加菜限制", True),
+    ],
+}
+
+
+def _ljust_helper(s: str, width: int) -> str:
+    """左对齐，视觉宽度补空格。"""
+    return s + " " * (width - _str_width(s))
+
+
+def format_main_help(is_admin: bool = False) -> str:
+    """格式化主帮助：显示所有一级指令（简洁列表）"""
+    lines = [
+        "【Self-Evolution 指令帮助】",
+        "",
+    ]
+
+    # 计算最大宽度用于对齐
+    max_width = max(_str_width(f"/{cmd}") for cmd in TOP_LEVEL_COMMANDS.keys()) if TOP_LEVEL_COMMANDS else 10
+
+    # 按顺序显示一级指令
+    for cmd_name, cmd_info in TOP_LEVEL_COMMANDS.items():
+        cmd = f"/{cmd_name}"
+        desc = cmd_info["desc"]
+        lines.append(f"  {_ljust_helper(cmd, max_width + 2)}  {desc}")
+
+    lines.append("")
+    lines.append("💡 输入 /<指令> help 查看详细（如 /af help）")
+
+    return "\n".join(lines)
+
+
+def format_group_help(group_name: str, is_admin: bool = False) -> str:
+    """格式化子帮助：显示指定指令组的所有子命令"""
+    name = group_name.lstrip("/").lower()
+
+    # 检查是否为有效的一级指令
+    if name not in TOP_LEVEL_COMMANDS:
+        return f"[Error] 未找到指令组 '{group_name}'"
+
+    group_info = TOP_LEVEL_COMMANDS[name]
+    group_display = f"/{name}"
+
+    # 获取子命令列表
+    sub_cmds = SUB_COMMANDS.get(name, [])
+
+    lines = [
+        f"【{group_display} {group_info['name']}】",
+        "",
+    ]
+
+    if not sub_cmds:
+        lines.append("  该指令暂无子命令")
+    else:
+        # 计算最大宽度用于对齐
+        max_width = max(_str_width(f"/{name} {sub}") for sub, _, _ in sub_cmds) if sub_cmds else 10
+
+        for sub_cmd, desc, admin_only in sub_cmds:
+            full_cmd = f"/{name} {sub_cmd}"
+            if admin_only and not is_admin:
+                continue  # 非管理员跳过管理员专属命令
+            lines.append(f"  {_ljust_helper(full_cmd, max_width + 2)}  {desc}")
+
+    lines.append("")
+    lines.append(f"💡 使用 /{name} <子命令> 执行（如 /{name} {sub_cmds[0][0] if sub_cmds else ''}）")
+
+    return "\n".join(lines)
+
+
 _FULL_CATALOG: list[HelpCommand] = [
     HelpCommand("base", "/se help", "查看指令帮助"),
     HelpCommand("base", "/se version", "查看插件版本"),
