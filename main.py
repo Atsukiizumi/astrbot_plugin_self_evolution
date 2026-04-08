@@ -182,6 +182,38 @@ class SelfEvolutionPlugin(Star):
             pass
         return ""
 
+    def _extract_image_url(self, event) -> str | None:
+        """从消息事件中提取第一张图片的 URL"""
+        try:
+            message_obj = getattr(event, "message_obj", None)
+            if not message_obj or not hasattr(message_obj, "message"):
+                return None
+
+            from astrbot.core.message.components import Image
+
+            for comp in message_obj.message:
+                if isinstance(comp, Image):
+                    # 优先使用 url 属性
+                    url = getattr(comp, "url", None)
+                    if url:
+                        return url
+                    # 备选：尝试从 raw_message 获取
+                    raw_msg = getattr(message_obj, "raw_message", None)
+                    if raw_msg and hasattr(raw_msg, "get"):
+                        raw_msg_list = raw_msg.get("message")
+                        if raw_msg_list:
+                            comp_file = getattr(comp, "file", "") or ""
+                            for seg in raw_msg_list:
+                                if isinstance(seg, dict) and seg.get("type") == "image":
+                                    seg_data = seg.get("data", {})
+                                    if isinstance(seg_data, dict):
+                                        url = seg_data.get("url")
+                                        if url:
+                                            return url
+        except Exception as e:
+            logger.warning(f"[Repeat] 提取图片URL失败: {e}")
+        return None
+
     def _resolve_profile_scope_id(self, group_id, user_id) -> str:
         if group_id:
             return str(group_id)
@@ -980,13 +1012,38 @@ class SelfEvolutionPlugin(Star):
             asyncio.create_task(self.entertainment.handle_meal_nl_trigger(event, msg_text))
 
         # 复读功能
-        if group_id and msg_text and sender_id != bot_id:
+        if group_id and sender_id != bot_id:
             if not msg_text.startswith("/"):
                 scope_id = str(group_id)
-                if self.repeat_manager.should_repeat(msg_text, scope_id):
-                    logger.info(f"[Repeat] 复读群 {scope_id}: {msg_text[:30]}...")
-                    self.repeat_manager.record_repeat(msg_text, scope_id)
-                    yield event.plain_result(msg_text)
+                is_image = getattr(event, "_image_processed", False)
+
+                should_repeat = self.repeat_manager.should_repeat(
+                    msg_text, scope_id, is_image, sender_id
+                )
+
+                if should_repeat:
+                    # 概率检查
+                    chance = getattr(self.plugin.cfg, "repeat_chance_percent", 10)
+                    import random as rand
+                    if rand.randint(1, 100) <= chance:
+                        logger.info(f"[Repeat] 复读群 {scope_id}: {'[图片]' if is_image else msg_text[:30]}...")
+
+                        if is_image and AstrImage:
+                            # 图片复读：提取图片 URL 并发送
+                            image_url = self._extract_image_url(event)
+                            if image_url:
+                                from astrbot.core.message.components import Image as ImgComponent
+                                yield event.chain_result([ImgComponent(image_url)])
+                            else:
+                                # 如果无法获取 URL，则发送文本
+                                yield event.plain_result(msg_text)
+                        else:
+                            yield event.plain_result(msg_text)
+
+                # 记录发送历史
+                self.repeat_manager.record_repeat(
+                    msg_text, scope_id, is_image, sender_id
+                )
 
     @filter.on_decorating_result()
     async def on_decorating_result(self, event: AstrMessageEvent):

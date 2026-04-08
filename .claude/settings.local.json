@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout:*)",
+      "Bash(git merge:*)",
+      "Bash(grep -E \"\\\\.\\(py|json\\)$\")",
+      "Bash(ls -la engine/*.py)",
+      "Bash(python -m py_compile engine/help_catalog.py commands/system.py commands/__init__.py main.py)",
+      "Bash(python -m py_compile main.py)",
+      "Bash(gpg --list-keys)",
+      "Bash(gpg2 --list-keys)",
+      "Bash(git config:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m 'feat: 实现分级帮助系统和直接 help 命令:*)",
+      "Bash(python -m py_compile config.py _conf_schema.json engine/repeat_manager.py main.py)"
+    ]
+  }
+}

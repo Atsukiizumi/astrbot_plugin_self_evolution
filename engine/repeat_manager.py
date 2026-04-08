@@ -18,6 +18,8 @@ class RepeatRecord:
     content_hash: str
     repeated_at: float
     scope_id: str
+    is_image: bool = False
+    user_ids: tuple = ()  # 发送过此内容的用户ID列表
 
 
 class RepeatManager:
@@ -27,6 +29,8 @@ class RepeatManager:
     - 概率触发
     - 冷却时间控制
     - 防重复（同一内容不会重复复读）
+    - 图片/文本区分
+    - 需要至少2人复读才触发（模拟人类行为）
     """
 
     def __init__(self, plugin: "SelfEvolutionPlugin"):
@@ -41,13 +45,20 @@ class RepeatManager:
         cutoff = time.time() - (ttl_hours * 3600)
         self._history = [r for r in self._history if r.repeated_at > cutoff]
 
-    def _is_content_repeated_before(self, content: str, scope_id: str) -> bool:
-        """检查内容是否在此群复读过"""
+    def _is_content_repeated_before(
+        self, content: str, scope_id: str, is_image: bool = False
+    ) -> tuple[bool, tuple]:
+        """检查内容是否在此群复读过，返回(是否重复, 发送过的用户列表)"""
         content_hash = hashlib.md5(content.encode("utf-8")).hexdigest()[:16]
         for record in self._history:
-            if record.content_hash == content_hash and record.scope_id == scope_id:
-                return True
-        return False
+            # 图片和文本分别判断，避免文本和图片混淆
+            if (
+                record.content_hash == content_hash
+                and record.scope_id == scope_id
+                and record.is_image == is_image
+            ):
+                return True, record.user_ids
+        return False, ()
 
     def _check_cooldown(self, scope_id: str) -> bool:
         """检查冷却时间是否已过"""
@@ -55,8 +66,17 @@ class RepeatManager:
         cooldown_seconds = getattr(self.plugin.cfg, "repeat_cooldown_seconds", 60)
         return (time.time() - last_time) >= cooldown_seconds
 
-    def should_repeat(self, content: str, scope_id: str) -> bool:
-        """判断是否应该复读"""
+    def should_repeat(
+        self, content: str, scope_id: str, is_image: bool = False, user_id: str = ""
+    ) -> bool:
+        """判断是否应该复读
+
+        Args:
+            content: 消息文本内容
+            scope_id: 群号/会话ID
+            is_image: 是否为图片消息
+            user_id: 发送者ID
+        """
         if not getattr(self.plugin.cfg, "repeat_enabled", False):
             return False
 
@@ -65,27 +85,64 @@ class RepeatManager:
         if target_groups and scope_id not in target_groups:
             return False
 
+        # 图片复读开关检查
+        if is_image and not getattr(self.plugin.cfg, "repeat_image_enabled", False):
+            return False
+
         if not self._check_cooldown(scope_id):
             return False
 
-        if self._is_content_repeated_before(content, scope_id):
+        was_repeated, previous_users = self._is_content_repeated_before(content, scope_id, is_image)
+
+        if was_repeated:
+            # 内容已被复读过，检查是否有其他用户发送过
+            if user_id and previous_users and user_id not in previous_users:
+                # 有其他用户发送过，可以触发bot复读
+                return True
             return False
 
-        chance = getattr(self.plugin.cfg, "repeat_chance_percent", 10)
-        if random.randint(1, 100) > chance:
-            return False
+        # 首次有人发送，记录但不触发
+        return False
 
-        return True
+    def record_repeat(
+        self, content: str, scope_id: str, is_image: bool = False, user_id: str = ""
+    ) -> None:
+        """记录复读历史
 
-    def record_repeat(self, content: str, scope_id: str) -> None:
-        """记录复读历史"""
+        Args:
+            content: 消息文本内容
+            scope_id: 群号/会话ID
+            is_image: 是否为图片消息
+            user_id: 发送者ID
+        """
         content_hash = hashlib.md5(content.encode("utf-8")).hexdigest()[:16]
 
-        self._history.append(RepeatRecord(
-            content_hash=content_hash,
-            repeated_at=time.time(),
-            scope_id=scope_id
-        ))
+        # 查找是否已有记录
+        existing_record = None
+        for record in self._history:
+            if (record.content_hash == content_hash
+                and record.scope_id == scope_id
+                and record.is_image == is_image):
+                existing_record = record
+                break
+
+        if existing_record:
+            # 更新用户列表
+            existing_user_ids = list(existing_record.user_ids)
+            if user_id and user_id not in existing_user_ids:
+                existing_user_ids.append(user_id)
+            existing_record.user_ids = tuple(existing_user_ids)
+            existing_record.repeated_at = time.time()
+        else:
+            # 新建记录
+            user_ids = (user_id,) if user_id else ()
+            self._history.append(RepeatRecord(
+                content_hash=content_hash,
+                repeated_at=time.time(),
+                scope_id=scope_id,
+                is_image=is_image,
+                user_ids=user_ids
+            ))
 
         self._cooldown_map[scope_id] = time.time()
 
@@ -103,4 +160,5 @@ class RepeatManager:
             "chance_percent": getattr(self.plugin.cfg, "repeat_chance_percent", 10),
             "cooldown_seconds": getattr(self.plugin.cfg, "repeat_cooldown_seconds", 60),
             "target_groups": getattr(self.plugin.cfg, "repeat_target_groups", []),
+            "image_enabled": getattr(self.plugin.cfg, "repeat_image_enabled", False),
         }

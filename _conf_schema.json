@@ -710,6 +710,12 @@
                 "type": "list",
                 "default": [],
                 "hint": "留空则所有群生效，填入群号后只在这些群复读。"
+            },
+            "image_enabled": {
+                "description": "启用图片复读",
+                "type": "bool",
+                "default": false,
+                "hint": "开启后 Bot 会尝试复读图片消息。"
             }
         }
     }

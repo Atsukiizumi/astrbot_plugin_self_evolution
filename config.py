@@ -572,3 +572,7 @@ class PluginConfig:
     @property
     def repeat_target_groups(self):
         return self._get_nested_list("repeat", "target_groups", [])
+
+    @property
+    def repeat_image_enabled(self):
+        return self._get_nested_bool("repeat", "image_enabled", False)
