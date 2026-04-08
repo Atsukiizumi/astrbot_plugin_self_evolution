@@ -551,3 +551,24 @@ class PluginConfig:
             "poke_complaint_texts",
             ["干嘛呢~", "有事说事！", "别闹", "正经点"],
         )
+
+    # repeat
+    @property
+    def repeat_enabled(self):
+        return self._get_nested_bool("repeat", "enabled", False)
+
+    @property
+    def repeat_chance_percent(self):
+        return self._get_nested_int("repeat", "chance_percent", 10)
+
+    @property
+    def repeat_cooldown_seconds(self):
+        return self._get_nested_int("repeat", "cooldown_seconds", 60)
+
+    @property
+    def repeat_history_ttl(self):
+        return self._get_nested_int("repeat", "history_ttl_hours", 24)
+
+    @property
+    def repeat_target_groups(self):
+        return self._get_nested_list("repeat", "target_groups", [])

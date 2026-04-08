@@ -251,6 +251,10 @@ class SelfEvolutionPlugin(Star):
             self.daily_batch = DailyBatchProcessor(self)
             self.memory_router = MemoryRouter(self)
             self.memory_tools = MemoryTools(self)
+            # 复读管理器
+            from .engine.repeat_manager import RepeatManager
+
+            self.repeat_manager = RepeatManager(self)
             logger.info(
                 "[SelfEvolution] 核心组件 (DAO, Eavesdropping, Entertainment, ImageCache, Memory, Persona, Profile, SAN, Reflection, SessionMemory*, Profile*) 初始化完成。"
             )
@@ -974,6 +978,15 @@ class SelfEvolutionPlugin(Star):
         bot_id = self._get_bot_id()
         if group_id and msg_text and sender_id != bot_id:
             asyncio.create_task(self.entertainment.handle_meal_nl_trigger(event, msg_text))
+
+        # 复读功能
+        if group_id and msg_text and sender_id != bot_id:
+            if not msg_text.startswith("/"):
+                scope_id = str(group_id)
+                if self.repeat_manager.should_repeat(msg_text, scope_id):
+                    logger.info(f"[Repeat] 复读群 {scope_id}: {msg_text[:30]}...")
+                    self.repeat_manager.record_repeat(msg_text, scope_id)
+                    yield event.plain_result(msg_text)
 
     @filter.on_decorating_result()
     async def on_decorating_result(self, event: AstrMessageEvent):

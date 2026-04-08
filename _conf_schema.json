@@ -675,5 +675,42 @@
                 "hint": "不戳回时随机选一条发送。"
             }
         }
+    },
+    "repeat": {
+        "type": "object",
+        "description": "复读功能设置",
+        "hint": "让 Bot 随机复读群消息，模仿人类行为。",
+        "items": {
+            "enabled": {
+                "description": "启用复读",
+                "type": "bool",
+                "default": false,
+                "hint": "开启后 Bot 会随机复读群消息。"
+            },
+            "chance_percent": {
+                "description": "复读概率",
+                "type": "int",
+                "default": 10,
+                "hint": "1~100，消息触发复读的概率百分比。"
+            },
+            "cooldown_seconds": {
+                "description": "复读冷却时间",
+                "type": "int",
+                "default": 60,
+                "hint": "同一群聊内，两次复读之间的最小间隔（秒）。"
+            },
+            "history_ttl_hours": {
+                "description": "复读历史有效期",
+                "type": "int",
+                "default": 24,
+                "hint": "已复读过的内容在多少小时内不再重复复读。"
+            },
+            "target_groups": {
+                "description": "生效的群号列表",
+                "type": "list",
+                "default": [],
+                "hint": "留空则所有群生效，填入群号后只在这些群复读。"
+            }
+        }
     }
 }
