@@ -368,6 +368,10 @@ class PluginConfig:
     def affinity_debug_enabled(self):
         return self._get_nested_bool("debug", "affinity_debug_enabled", False)
 
+    @property
+    def repeat_debug_enabled(self):
+        return self._get_nested_bool("debug", "repeat_debug_enabled", False)
+
     # moderation
     @property
     def moderation_enforcement_enabled(self):
@@ -562,12 +566,16 @@ class PluginConfig:
         return self._get_nested_int("repeat", "chance_percent", 10)
 
     @property
-    def repeat_cooldown_seconds(self):
-        return self._get_nested_int("repeat", "cooldown_seconds", 60)
+    def repeat_delay_seconds_min(self):
+        return self._get_nested_int("repeat", "delay_seconds_min", 3)
 
     @property
-    def repeat_history_ttl(self):
-        return self._get_nested_int("repeat", "history_ttl_hours", 24)
+    def repeat_delay_seconds_max(self):
+        return self._get_nested_int("repeat", "delay_seconds_max", 15)
+
+    @property
+    def repeat_expire_minutes(self):
+        return self._get_nested_int("repeat", "expire_minutes", 2)
 
     @property
     def repeat_target_groups(self):
@@ -576,3 +584,16 @@ class PluginConfig:
     @property
     def repeat_image_enabled(self):
         return self._get_nested_bool("repeat", "image_enabled", False)
+
+    @property
+    def repeat_sticker_enabled(self):
+        return self._get_nested_bool("repeat", "sticker_enabled", False)
+
+    # persona_arc
+    @property
+    def persona_arc_enabled(self):
+        return self._get_nested_bool("persona_arc", "persona_arc_enabled", False)
+
+    @property
+    def persona_arc_active_arc_id(self):
+        return self._get_nested_str("persona_arc", "persona_arc_active_arc_id", "amphoreus_demurge")

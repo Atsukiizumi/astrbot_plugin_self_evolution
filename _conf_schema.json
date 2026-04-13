@@ -485,6 +485,12 @@
                 "type": "bool",
                 "default": false,
                 "hint": "开启后记录信号命中、限流、积分变更原因。"
+            },
+            "repeat_debug_enabled": {
+                "description": "复读模块调试日志",
+                "type": "bool",
+                "default": false,
+                "hint": "开启后记录复读触发判断、打断检测和用户重复等详情。"
             }
         }
     },
@@ -685,25 +691,31 @@
                 "description": "启用复读",
                 "type": "bool",
                 "default": false,
-                "hint": "开启后 Bot 会随机复读群消息。"
+                "hint": "开启后 Bot 会随机复制群消息。"
             },
             "chance_percent": {
                 "description": "复读概率",
                 "type": "int",
                 "default": 10,
-                "hint": "1~100，消息触发复读的概率百分比。"
+                "hint": "1~100，满足复制条件后实际触发的概率。"
             },
-            "cooldown_seconds": {
-                "description": "复读冷却时间",
+            "delay_seconds_min": {
+                "description": "延迟下限",
                 "type": "int",
-                "default": 60,
-                "hint": "同一群聊内，两次复读之间的最小间隔（秒）。"
+                "default": 3,
+                "hint": "复制消息随机延迟的下限，单位秒。"
             },
-            "history_ttl_hours": {
-                "description": "复读历史有效期",
+            "delay_seconds_max": {
+                "description": "延迟上限",
                 "type": "int",
-                "default": 24,
-                "hint": "已复读过的内容在多少小时内不再重复复读。"
+                "default": 15,
+                "hint": "复制消息随机延迟的上限，单位秒。"
+            },
+            "expire_minutes": {
+                "description": "失效时间",
+                "type": "int",
+                "default": 2,
+                "hint": "复制机会的失效时间，单位分钟。超过此时间无复制则失效。"
             },
             "target_groups": {
                 "description": "生效的群号列表",
@@ -716,6 +728,31 @@
                 "type": "bool",
                 "default": false,
                 "hint": "开启后 Bot 会尝试复读图片消息。"
+            },
+            "sticker_enabled": {
+                "description": "启用表情包复读",
+                "type": "bool",
+                "default": false,
+                "hint": "开启后 Bot 会尝试复读表情包（sub_type=1）。"
+            }
+        }
+    },
+    "persona_arc": {
+        "type": "object",
+        "description": "人格弧线外挂",
+        "hint": "角色人格成长弧线配置，支持阶段化人格演变。",
+        "items": {
+            "persona_arc_enabled": {
+                "description": "启用人格弧线",
+                "type": "bool",
+                "default": false,
+                "hint": "开启后启用人格弧线系统，需要同时配置 active_arc_id。"
+            },
+            "persona_arc_active_arc_id": {
+                "description": "启用的弧线ID",
+                "type": "string",
+                "default": "amphoreus_demurge",
+                "hint": "指定启用的弧线配置ID，对应 engine/persona_arc/profiles/ 下的模块名。"
             }
         }
     }

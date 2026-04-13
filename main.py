@@ -45,6 +45,7 @@ from .engine.event_context import extract_interaction_context
 from .engine.persona_sim_engine import PersonaSimEngine
 from .engine.persona_sim_consolidation import PersonaSimConsolidator
 from .engine.persona_sim_injection import snapshot_to_debug_str, snapshot_to_prompt
+from .engine.persona_arc.manager import PersonaArcManager
 from .engine.message_normalization import ensure_event_message_text
 from .engine.memory import MemoryManager
 from .engine.memory_router import MemoryRouter
@@ -159,7 +160,7 @@ async def _poke_reply_async(plugin, target_id: str, user_id: str, group_id: str,
     "astrbot_plugin_self_evolution",
     "自我进化 (Self-Evolution)",
     "CognitionCore 7.0 数字生命。",
-    "Ver 5.2.0",
+    "Ver 5.3.0",
 )
 class SelfEvolutionPlugin(Star):
     @staticmethod
@@ -213,6 +214,28 @@ class SelfEvolutionPlugin(Star):
         except Exception as e:
             logger.warning(f"[Repeat] 提取图片URL失败: {e}")
         return None
+
+    def _extract_image_file(self, event) -> tuple[str | None, str | None]:
+        """从消息事件中提取第一张图片的 file ID 和 URL
+
+        Returns:
+            tuple[str | None, str | None]: (file_id, url)
+        """
+        try:
+            message_obj = getattr(event, "message_obj", None)
+            if not message_obj or not hasattr(message_obj, "message"):
+                return None, None
+
+            from astrbot.core.message.components import Image
+
+            for comp in message_obj.message:
+                if isinstance(comp, Image):
+                    file_id = getattr(comp, "file", None)
+                    url = getattr(comp, "url", None)
+                    return file_id, url
+        except Exception as e:
+            logger.warning(f"[Repeat] 提取图片file失败: {e}")
+        return None, None
 
     def _resolve_profile_scope_id(self, group_id, user_id) -> str:
         if group_id:
@@ -272,6 +295,7 @@ class SelfEvolutionPlugin(Star):
             # Persona 生活模拟引擎
             self.persona_sim = PersonaSimEngine(self)
             self.persona_consolidator = PersonaSimConsolidator(self)
+            self.persona_arc = PersonaArcManager(self)
             # 关系温度引擎
             self.affinity = AffinityEngine(self)
             # 认知系统模块
@@ -468,6 +492,15 @@ class SelfEvolutionPlugin(Star):
                 pass
         if sim_block:
             parts.append(sim_block)
+
+        arc_block = ""
+        if ctx.scope_id and hasattr(self, "persona_arc") and self.persona_arc:
+            try:
+                arc_block = await self.persona_arc.build_prompt(str(ctx.scope_id))
+            except Exception:
+                pass
+        if arc_block:
+            parts.append(arc_block)
 
         if explicit_facts:
             await self._writeback_reflection_facts(ctx, explicit_facts)
@@ -993,7 +1026,7 @@ class SelfEvolutionPlugin(Star):
             return
 
         group_id = event.get_group_id()
-        msg_text = await ensure_event_message_text(event, self.dao)
+        msg_text, has_image, image_sub_type = await ensure_event_message_text(event, self.dao)
 
         # 关系温度自动积累（弱信号）
         asyncio.create_task(self.affinity.process_message(event))
@@ -1011,14 +1044,28 @@ class SelfEvolutionPlugin(Star):
         if group_id and msg_text and sender_id != bot_id:
             asyncio.create_task(self.entertainment.handle_meal_nl_trigger(event, msg_text))
 
-        # 复读功能
+# 复读功能
         if group_id and sender_id != bot_id:
             if not msg_text.startswith("/"):
                 scope_id = str(group_id)
                 is_image = getattr(event, "_image_processed", False)
+                image_sub_type = getattr(event, "_image_sub_type", 0)  # 0=普通图片, 1=表情包
+                is_sticker = is_image and image_sub_type == 1
+
+                # 调试日志
+                logger.debug(
+                    f"[Repeat] check: enabled={self.cfg.repeat_enabled}, "
+                    f"content={msg_text[:20] if msg_text else '(empty)'}, "
+                    f"scope={scope_id}, is_image={is_image}, is_sticker={is_sticker}"
+                )
 
                 should_repeat = self.repeat_manager.should_repeat(
-                    msg_text, scope_id, is_image, sender_id
+                    msg_text, scope_id, is_image, is_sticker, sender_id
+                )
+
+                # 无论是否触发，都记录用户参与（更新用户列表）
+                self.repeat_manager.record_user_repeat(
+                    msg_text, scope_id, is_image, is_sticker, sender_id
                 )
 
                 if should_repeat:
@@ -1026,24 +1073,42 @@ class SelfEvolutionPlugin(Star):
                     chance = getattr(self.plugin.cfg, "repeat_chance_percent", 10)
                     import random as rand
                     if rand.randint(1, 100) <= chance:
-                        logger.info(f"[Repeat] 复读群 {scope_id}: {'[图片]' if is_image else msg_text[:30]}...")
+                        logger.info(f"[Repeat] 准备复读群 {scope_id}: {'[图片]' if is_image else msg_text[:30]}...")
 
+                        # 获取随机延迟
+                        delay = self.repeat_manager.get_random_delay()
+
+                        # 等待随机延迟
+                        await asyncio.sleep(delay)
+
+                        # 发送复读内容
+                        logger.info(f"[Repeat] 执行复读群 {scope_id}: {'[图片]' if is_image else msg_text[:30]}...")
                         if is_image and AstrImage:
-                            # 图片复读：提取图片 URL 并发送
-                            image_url = self._extract_image_url(event)
+                            # 优先使用 URL，file_id 发送容易失败
+                            _, image_url = self._extract_image_file(event)
                             if image_url:
                                 from astrbot.core.message.components import Image as ImgComponent
                                 yield event.chain_result([ImgComponent(image_url)])
                             else:
-                                # 如果无法获取 URL，则发送文本
-                                yield event.plain_result(msg_text)
+                                # 无法获取 URL 时跳过图片
+                                logger.warning(f"[Repeat] 无法获取图片URL，跳过图片复读")
                         else:
                             yield event.plain_result(msg_text)
 
-                # 记录发送历史
-                self.repeat_manager.record_repeat(
-                    msg_text, scope_id, is_image, sender_id
+                        # 标记 Bot 已参与，避免重复参与
+                        self.repeat_manager.on_bot_repeated(
+                            msg_text, scope_id, is_image, is_sticker
+                        )
+
+        # PersonaArc 人格弧线浇灌
+        if group_id and self.cfg.persona_arc_enabled:
+            asyncio.create_task(
+                self.persona_arc.pour_from_message(
+                    scope_id=str(group_id),
+                    text=msg_text,
+                    direct=has_at_to_bot or has_reply_to_bot,
                 )
+            )
 
     @filter.on_decorating_result()
     async def on_decorating_result(self, event: AstrMessageEvent):
@@ -1318,6 +1383,182 @@ class SelfEvolutionPlugin(Star):
         event.set_extra("self_evolution_command_reply", True)
         yield event.plain_result(result)
 
+    @filter.command_group("arc")
+    def arc_group(self):
+        """人格弧线"""
+
+    def _check_arc_admin(self, event: AstrMessageEvent) -> bool:
+        return bool(event.is_admin())
+
+    @arc_group.command("status")
+    async def arc_status(self, event: AstrMessageEvent, scope: str = ""):
+        """查看人格弧线状态"""
+        if not self._check_arc_admin(event):
+            yield event.plain_result("此指令仅限管理员使用。")
+            return
+
+        if not hasattr(self, "persona_arc") or not self.persona_arc:
+            yield event.plain_result("Persona Arc 不可用。")
+            return
+
+        group_id = event.get_group_id()
+        sender_id = str(event.get_sender_id())
+
+        if scope.strip():
+            target_scope = scope.strip()
+        elif group_id:
+            target_scope = str(group_id)
+        else:
+            target_scope = self._resolve_profile_scope_id(None, sender_id)
+
+        event.set_extra("self_evolution_command_reply", True)
+        result = await self.persona_arc.get_status_text(target_scope)
+        yield event.plain_result(result)
+
+    @arc_group.command("prompt")
+    async def arc_prompt(self, event: AstrMessageEvent, scope: str = ""):
+        """查看当前阶段注入的 prompt"""
+        if not self._check_arc_admin(event):
+            yield event.plain_result("此指令仅限管理员使用。")
+            return
+
+        if not hasattr(self, "persona_arc") or not self.persona_arc:
+            yield event.plain_result("Persona Arc 不可用。")
+            return
+
+        group_id = event.get_group_id()
+        sender_id = str(event.get_sender_id())
+
+        if scope.strip():
+            target_scope = scope.strip()
+        elif group_id:
+            target_scope = str(group_id)
+        else:
+            target_scope = self._resolve_profile_scope_id(None, sender_id)
+
+        event.set_extra("self_evolution_command_reply", True)
+        result = await self.persona_arc.get_prompt_preview(target_scope)
+        yield event.plain_result(result)
+
+    @arc_group.command("emotions")
+    async def arc_emotions(self, event: AstrMessageEvent, scope: str = ""):
+        """查看当前 scope 已解锁的情感"""
+        if not self._check_arc_admin(event):
+            yield event.plain_result("此指令仅限管理员使用。")
+            return
+
+        if not hasattr(self, "persona_arc") or not self.persona_arc:
+            yield event.plain_result("Persona Arc 不可用。")
+            return
+
+        group_id = event.get_group_id()
+        sender_id = str(event.get_sender_id())
+
+        if scope.strip():
+            target_scope = scope.strip()
+        elif group_id:
+            target_scope = str(group_id)
+        else:
+            target_scope = self._resolve_profile_scope_id(None, sender_id)
+
+        if not self.persona_arc.enabled:
+            yield event.plain_result("Persona Arc 未启用。")
+            return
+
+        arc_id = self.persona_arc.profile.arc_id if self.persona_arc.profile else ""
+        emotions = await self.persona_arc.emotions.list_emotions(target_scope, arc_id, limit=20)
+
+        if not emotions:
+            event.set_extra("self_evolution_command_reply", True)
+            yield event.plain_result(f"[Persona Arc 情感图鉴]\n当前暂无已解锁的情感。")
+            return
+
+        lines = ["[Persona Arc 情感图鉴]"]
+        for em in emotions:
+            name = em.get("emotion_name", "")
+            definition = em.get("definition_by_user", "")
+            confidence = em.get("confidence", 0.8)
+            if name and definition:
+                lines.append(f"- {name}：{definition}（置信度: {confidence:.0%}）")
+
+        event.set_extra("self_evolution_command_reply", True)
+        yield event.plain_result("\n".join(lines))
+
+    @arc_group.command("ruminations")
+    async def arc_ruminations(self, event: AstrMessageEvent, scope: str = ""):
+        """管理员查看最近反刍"""
+        if not self._check_arc_admin(event):
+            yield event.plain_result("此指令仅限管理员使用。")
+            return
+
+        if not hasattr(self, "persona_arc") or not self.persona_arc:
+            yield event.plain_result("Persona Arc 不可用。")
+            return
+
+        group_id = event.get_group_id()
+        sender_id = str(event.get_sender_id())
+        if scope.strip():
+            target_scope = scope.strip()
+        elif group_id:
+            target_scope = str(group_id)
+        else:
+            target_scope = self._resolve_profile_scope_id(None, sender_id)
+
+        if not self.persona_arc.enabled:
+            yield event.plain_result("Persona Arc 未启用。")
+            return
+
+        arc_id = self.persona_arc.profile.arc_id if self.persona_arc.profile else ""
+        ruminations = await self.persona_arc.ruminations.list_ruminations(target_scope, arc_id, limit=10)
+
+        if not ruminations:
+            event.set_extra("self_evolution_command_reply", True)
+            yield event.plain_result(f"[Persona Arc 反刍记录]\n当前暂无离线反刍。")
+            return
+
+        lines = ["[Persona Arc 反刍记录]"]
+        for rum in ruminations:
+            text = rum.get("text", "")
+            injected = rum.get("injected", 0)
+            status = "已注入" if injected else "待注入"
+            if text:
+                lines.append(f"- [{status}] {text}")
+
+        event.set_extra("self_evolution_command_reply", True)
+        yield event.plain_result("\n".join(lines))
+
+    @arc_group.command("debug_pour")
+    async def arc_debug_pour(self, event: AstrMessageEvent, amount: str = "", reason: str = ""):
+        """调试：增加 progress（仅管理员，amount > 0）"""
+        if not self._check_arc_admin(event):
+            yield event.plain_result("此指令仅限管理员使用。")
+            return
+
+        if not hasattr(self, "persona_arc") or not self.persona_arc:
+            yield event.plain_result("Persona Arc 不可用。")
+            return
+
+        try:
+            value = float(amount)
+        except (ValueError, TypeError):
+            yield event.plain_result("用法：/arc debug_pour <amount> [reason]")
+            return
+
+        if value <= 0:
+            yield event.plain_result("amount 必须大于 0。")
+            return
+
+        group_id = event.get_group_id()
+        sender_id = str(event.get_sender_id())
+        if group_id:
+            target_scope = str(group_id)
+        else:
+            target_scope = self._resolve_profile_scope_id(None, sender_id)
+
+        event.set_extra("self_evolution_command_reply", True)
+        result = await self.persona_arc.debug_add_progress(target_scope, value, reason or "debug")
+        yield event.plain_result(result)
+
     @filter.command("今日老婆")
     async def today_waifu(self, event: AstrMessageEvent):
         """今日老婆功能 - 随机抽取一名群友"""
@@ -1526,6 +1767,43 @@ class SelfEvolutionPlugin(Star):
             reason(string): 修改理由
         """
         return await self.persona.evolve_persona(event, new_system_prompt, reason)
+
+    @filter.llm_tool(name="record_arc_emotion")
+    async def record_arc_emotion(self, event: AstrMessageEvent, emotion_name: str, feeling_description: str) -> str:
+        """当用户明确解释了一种情绪、关系、牵挂、失落、安心等体验时，记录到人格弧线情感图鉴。
+
+        仅当用户主动描述情绪体验时调用，不要随便记录普通闲聊。
+
+        Args:
+            emotion_name(string): 情感名称，如"牵挂"、"安心"、"失落"
+            feeling_description(string): 用户对该情感的描述
+        """
+        if not hasattr(self, "persona_arc") or not self.persona_arc:
+            return "Persona Arc 未启用"
+
+        if not self.persona_arc.enabled:
+            return "Persona Arc 未启用"
+
+        group_id = event.get_group_id()
+        sender_id = str(event.get_sender_id())
+        if group_id:
+            scope_id = str(group_id)
+        else:
+            scope_id = self._resolve_profile_scope_id(None, sender_id)
+
+        try:
+            await self.persona_arc.record_emotion(
+                scope_id=scope_id,
+                emotion_name=emotion_name,
+                definition_by_user=feeling_description,
+                source_text="",
+                confidence=0.8,
+            )
+            await self.persona_arc.add_progress(scope_id, 1.0, reason="emotion_unlock")
+            return f"已记录情感：{emotion_name}"
+        except Exception as e:
+            logger.warning(f"[PersonaArc] record_arc_emotion failed: {e}")
+            return "情感记录失败"
 
     @filter.command_group("af")
     def af_group(self):

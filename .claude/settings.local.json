@@ -12,7 +12,21 @@
       "Bash(git config:*)",
       "Bash(git add:*)",
       "Bash(git commit -m 'feat: 实现分级帮助系统和直接 help 命令:*)",
-      "Bash(python -m py_compile config.py _conf_schema.json engine/repeat_manager.py main.py)"
+      "Bash(python -m py_compile config.py _conf_schema.json engine/repeat_manager.py main.py)",
+      "Bash(mv:*)",
+      "Bash(python -c \"from main import SelfEvolutionPlugin; print\\('Import OK'\\)\")",
+      "Read(//d/Movethis/Desktop/code/python workspace/AstrBot/**)",
+      "Bash(python -c \"import sys; sys.path.insert\\(0, 'data/plugins/astrbot_plugin_self_evolution'\\); from astrbot_plugin_self_evolution.main import SelfEvolutionPlugin; print\\('Import OK'\\)\")",
+      "Bash(python -m py_compile engine/repeat_manager.py engine/help_catalog.py commands/system.py commands/__init__.py)",
+      "Bash(python -m py_compile main.py config.py dao.py scheduler/*.py)",
+      "Bash(python -m py_compile engine/repeat_manager.py)",
+      "Bash(python -m py_compile main.py engine/repeat_manager.py)",
+      "WebSearch",
+      "WebFetch(domain:napneko.github.io)",
+      "Bash(python -m py_compile main.py engine/repeat_manager.py engine/message_normalization.py config.py)",
+      "Bash(python -m py_compile engine/repeat_manager.py main.py)",
+      "Bash(python -m py_compile config.py engine/repeat_manager.py main.py)",
+      "Bash(python -m py_compile config.py engine/repeat_manager.py)"
     ]
   }
 }
