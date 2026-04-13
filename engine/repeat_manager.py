@@ -128,10 +128,12 @@ class RepeatManager:
             return False
 
         # 清理已打断的/过期的内容
-        if self._is_interrupted(scope_id):
+        current = self._current.get(scope_id)
+        if current and self._is_interrupted(scope_id):
             elapsed = time.time() - current.created_at
             self._log_debug(f"[Repeat] Content expired/interrupted, elapsed={elapsed:.1f}s")
             self._clear_current(scope_id)
+            current = None
 
         current = self._current.get(scope_id)
         content_hash = self._make_hash(content, content_type)
