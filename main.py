@@ -1063,10 +1063,11 @@ class SelfEvolutionPlugin(Star):
                     msg_text, scope_id, is_image, is_sticker, sender_id
                 )
 
-                # 无论是否触发，都记录用户参与（更新用户列表）
-                self.repeat_manager.record_user_repeat(
-                    msg_text, scope_id, is_image, is_sticker, sender_id
-                )
+                # 仅在触发时才记录用户参与
+                if should_repeat:
+                    self.repeat_manager.record_user_repeat(
+                        msg_text, scope_id, is_image, is_sticker, sender_id
+                    )
 
                 if should_repeat:
                     # 概率检查
