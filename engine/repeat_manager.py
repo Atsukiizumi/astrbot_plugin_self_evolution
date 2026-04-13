@@ -52,9 +52,10 @@ class RepeatManager:
             return "image"
         return "text"
 
-    def _make_hash(self, content: str, content_type: ContentType) -> str:
+    def _make_hash(self, content: str, content_type: ContentType, content_id: str = "") -> str:
         """生成内容 hash"""
-        raw = f"{content_type}:{content}"
+        # 图片/表情包使用content_id（URL），文本使用content
+        raw = f"{content_type}:{content_id if content_id else content}"
         return hashlib.md5(raw.encode("utf-8")).hexdigest()[:16]
 
     def _is_interrupted(self, scope_id: str) -> bool:
@@ -96,6 +97,7 @@ class RepeatManager:
         is_image: bool = False,
         is_sticker: bool = False,
         user_id: str = "",
+        content_id: str = "",
     ) -> bool:
         """判断是否应该参与复读
 
@@ -105,6 +107,7 @@ class RepeatManager:
             is_image: 是否为图片消息
             is_sticker: 是否为表情包消息
             user_id: 发送者ID
+            content_id: 图片/表情包的唯一标识（URL或file_id），用于区分不同图片
         """
         from astrbot.api import logger
 
@@ -136,7 +139,7 @@ class RepeatManager:
             current = None
 
         current = self._current.get(scope_id)
-        content_hash = self._make_hash(content, content_type)
+        content_hash = self._make_hash(content, content_type, content_id)
 
         # 新内容：检查是否与当前可复制内容匹配
         if current:
@@ -196,10 +199,11 @@ class RepeatManager:
         scope_id: str,
         is_image: bool = False,
         is_sticker: bool = False,
+        content_id: str = "",
     ) -> None:
         """Bot 实际参与复读后调用，标记该内容 Bot 已参与"""
         content_type = self._get_content_type(is_image, is_sticker)
-        content_hash = self._make_hash(content, content_type)
+        content_hash = self._make_hash(content, content_type, content_id)
         self._mark_bot_participated(scope_id, content_hash)
 
         # 同时清除当前可复制内容，避免重复触发
@@ -212,13 +216,14 @@ class RepeatManager:
         is_image: bool = False,
         is_sticker: bool = False,
         user_id: str = "",
+        content_id: str = "",
     ) -> None:
         """记录用户复制（用于更新用户列表）"""
         if not scope_id or not user_id:
             return
 
         content_type = self._get_content_type(is_image, is_sticker)
-        content_hash = self._make_hash(content, content_type)
+        content_hash = self._make_hash(content, content_type, content_id)
 
         current = self._current.get(scope_id)
         if current and current.content_hash == content_hash:

@@ -1059,14 +1059,19 @@ class SelfEvolutionPlugin(Star):
                     f"scope={scope_id}, is_image={is_image}, is_sticker={is_sticker}"
                 )
 
+                # 获取图片URL用于区分不同图片
+                content_id = ""
+                if is_image:
+                    content_id = self._extract_image_url(event) or ""
+
                 should_repeat = self.repeat_manager.should_repeat(
-                    msg_text, scope_id, is_image, is_sticker, sender_id
+                    msg_text, scope_id, is_image, is_sticker, sender_id, content_id
                 )
 
                 # 仅在触发时才记录用户参与
                 if should_repeat:
                     self.repeat_manager.record_user_repeat(
-                        msg_text, scope_id, is_image, is_sticker, sender_id
+                        msg_text, scope_id, is_image, is_sticker, sender_id, content_id
                     )
 
                 if should_repeat:
@@ -1098,7 +1103,7 @@ class SelfEvolutionPlugin(Star):
 
                         # 标记 Bot 已参与，避免重复参与
                         self.repeat_manager.on_bot_repeated(
-                            msg_text, scope_id, is_image, is_sticker
+                            msg_text, scope_id, is_image, is_sticker, content_id
                         )
 
         # PersonaArc 人格弧线浇灌
