@@ -12,7 +12,7 @@ from astrbot.api.all import AstrMessageEvent, Context, Star, register
 from astrbot.api.event import filter
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import StarTools
-from astrbot.core.message.components import Plain, WechatEmoji
+from astrbot.core.message.components import Plain
 
 from .commands.common import CommandContext, ensure_admin
 
@@ -29,6 +29,10 @@ try:
     from astrbot.core.message.components import Video as AstrVideo
 except ImportError:
     AstrVideo = None
+try:
+    from astrbot.core.message.components import WechatEmoji
+except ImportError:
+    WechatEmoji = None
 from astrbot.core.star.star_handler import EventType, StarHandlerMetadata, star_handlers_registry
 
 from . import commands
@@ -1044,7 +1048,7 @@ class SelfEvolutionPlugin(Star):
         if group_id and msg_text and sender_id != bot_id:
             asyncio.create_task(self.entertainment.handle_meal_nl_trigger(event, msg_text))
 
-# 复读功能
+        # 复读功能
         if group_id and sender_id != bot_id:
             if not msg_text.startswith("/"):
                 scope_id = str(group_id)
@@ -1078,6 +1082,7 @@ class SelfEvolutionPlugin(Star):
                     # 概率检查
                     chance = getattr(self.plugin.cfg, "repeat_chance_percent", 10)
                     import random as rand
+
                     if rand.randint(1, 100) <= chance:
                         logger.info(f"[Repeat] 准备复读群 {scope_id}: {'[图片]' if is_image else msg_text[:30]}...")
 
@@ -1094,6 +1099,7 @@ class SelfEvolutionPlugin(Star):
                             _, image_url = self._extract_image_file(event)
                             if image_url:
                                 from astrbot.core.message.components import Image as ImgComponent
+
                                 yield event.chain_result([ImgComponent(image_url)])
                             else:
                                 # 无法获取 URL 时跳过图片
@@ -1102,9 +1108,7 @@ class SelfEvolutionPlugin(Star):
                             yield event.plain_result(msg_text)
 
                         # 标记 Bot 已参与，避免重复参与
-                        self.repeat_manager.on_bot_repeated(
-                            msg_text, scope_id, is_image, is_sticker, content_id
-                        )
+                        self.repeat_manager.on_bot_repeated(msg_text, scope_id, is_image, is_sticker, content_id)
 
         # PersonaArc 人格弧线浇灌
         if group_id and self.cfg.persona_arc_enabled:
@@ -1203,7 +1207,7 @@ class SelfEvolutionPlugin(Star):
                 if cleaned:
                     self.eavesdropping._output_guard._add_recent(cleaned)
                     has_text = True
-            elif isinstance(comp, WechatEmoji):
+            elif WechatEmoji and isinstance(comp, WechatEmoji):
                 has_emoji = True
             elif AstrImage and isinstance(comp, AstrImage):
                 has_emoji = True
